@@ -67,7 +67,7 @@ def get_language_code(language_name):
     Supported languages (23 total):
     - en (English), es (Spanish), fr (French), de (German), it (Italian)
     - pt (Portuguese), pl (Polish), tr (Turkish), ru (Russian), nl (Dutch)
-    - cs (Czech), ar (Arabic), zh-cn (Chinese), hu (Hungarian), ko (Korean)
+    - cs (Czech), ar (Arabic), zh (Chinese), hu (Hungarian), ko (Korean)
     - ja (Japanese), hi (Hindi), th (Thai), vi (Vietnamese), id (Indonesian)
     - he (Hebrew), uk (Ukrainian), el (Greek)
     """
@@ -78,11 +78,11 @@ def get_language_code(language_name):
         'en': 'en',
 
         # Chinese
-        'chinese': 'zh-cn',
-        '中文': 'zh-cn',
-        '简体中文': 'zh-cn',
-        'zh': 'zh-cn',
-        'zh-cn': 'zh-cn',
+        'chinese': 'zh',
+        '中文': 'zh',
+        '简体中文': 'zh',
+        'zh': 'zh',
+        'zh-cn': 'zh',
 
         # Spanish
         'spanish': 'es',
@@ -214,7 +214,7 @@ def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exagger
     Args:
         text: Text to synthesize
         save_path: Path to save the generated audio
-        language_id: Language code (e.g., 'en', 'zh-cn', 'ja')
+        language_id: Language code (e.g., 'en', 'zh', 'ja')
         audio_prompt: Optional path to reference audio for voice cloning
         exaggeration: Control emotionality (0.0-1.0, default 0.5)
         cfg_weight: Influence of audio prompt (0.0-1.0, default 0.4)

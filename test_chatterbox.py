@@ -23,7 +23,7 @@ def test_basic_tts():
         ("Bonjour, ceci est un test.", "fr", "test_fr.wav"),
         ("Hola, esta es una prueba.", "es", "test_es.wav"),
         ("これはテストです。", "ja", "test_ja.wav"),
-        ("这是一个测试。", "zh-cn", "test_zh.wav"),
+        ("这是一个测试。", "zh", "test_zh.wav"),
     ]
 
     output_dir = Path("output/test_chatterbox")
