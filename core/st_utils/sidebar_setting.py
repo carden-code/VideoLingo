@@ -155,13 +155,22 @@ def page_setting():
         elif select_tts == "chatterbox_tts":
             st.info("📦 Install: `pip install chatterbox-tts soundfile`")
 
+            # Helper function to safely load config with defaults
+            def load_chatterbox_config(key, default):
+                try:
+                    return load_key(f"chatterbox_tts.{key}")
+                except KeyError:
+                    # Initialize with default if key doesn't exist
+                    update_key(f"chatterbox_tts.{key}", default)
+                    return default
+
             # Voice clone mode
             mode_options = {
                 1: "Mode 1: Basic TTS (No cloning, fastest)",
                 2: "Mode 2: Single reference (Balanced)",
                 3: "Mode 3: Per-segment reference (Best quality)"
             }
-            current_mode = load_key("chatterbox_tts.voice_clone_mode")
+            current_mode = load_chatterbox_config("voice_clone_mode", 1)
             selected_mode = st.selectbox(
                 "Voice Clone Mode",
                 options=list(mode_options.keys()),
@@ -174,35 +183,37 @@ def page_setting():
                 st.rerun()
 
             # Exaggeration control
+            current_exaggeration = load_chatterbox_config("exaggeration", 0.5)
             exaggeration = st.slider(
                 "Exaggeration (Emotionality)",
                 min_value=0.0,
                 max_value=1.0,
-                value=float(load_key("chatterbox_tts.exaggeration")),
+                value=float(current_exaggeration),
                 step=0.1,
                 help="Control speech emotionality: 0.0=monotone, 0.5=balanced (recommended), 1.0=very expressive"
             )
-            if exaggeration != load_key("chatterbox_tts.exaggeration"):
+            if exaggeration != current_exaggeration:
                 update_key("chatterbox_tts.exaggeration", exaggeration)
                 st.rerun()
 
             # CFG weight (only for modes 2 and 3)
             if selected_mode in [2, 3]:
+                current_cfg = load_chatterbox_config("cfg_weight", 0.4)
                 cfg_weight = st.slider(
                     "CFG Weight (Voice Clone Strength)",
                     min_value=0.0,
                     max_value=1.0,
-                    value=float(load_key("chatterbox_tts.cfg_weight")),
+                    value=float(current_cfg),
                     step=0.1,
                     help="Influence of reference audio: 0.3-0.5 recommended for best results"
                 )
-                if cfg_weight != load_key("chatterbox_tts.cfg_weight"):
+                if cfg_weight != current_cfg:
                     update_key("chatterbox_tts.cfg_weight", cfg_weight)
                     st.rerun()
 
             # Device selection
             device_options = ["cuda", "cpu"]
-            current_device = load_key("chatterbox_tts.device")
+            current_device = load_chatterbox_config("device", "cuda")
             selected_device = st.selectbox(
                 "Device",
                 options=device_options,
