@@ -32,5 +32,6 @@ g2p-en
 xmltodict
 
 # Chatterbox TTS - Open-source multilingual TTS with voice cloning
-chatterbox-tts
+# Install from GitHub to get all dependencies including Perth watermarking
+git+https://github.com/resemble-ai/chatterbox.git
 soundfile
