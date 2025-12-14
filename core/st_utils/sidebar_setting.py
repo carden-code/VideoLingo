@@ -84,7 +84,7 @@ def page_setting():
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
     with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["azure_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts"]
+        tts_methods = ["azure_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts", "chatterbox_tts"]
         select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
         if select_tts != load_key("tts_method"):
             update_key("tts_method", select_tts)
@@ -151,7 +151,68 @@ def page_setting():
         
         elif select_tts == "f5tts":
             config_input("302ai API", "f5tts.302_api")
-        
+
+        elif select_tts == "chatterbox_tts":
+            st.info("📦 Install: `pip install chatterbox-tts soundfile`")
+
+            # Voice clone mode
+            mode_options = {
+                1: "Mode 1: Basic TTS (No cloning, fastest)",
+                2: "Mode 2: Single reference (Balanced)",
+                3: "Mode 3: Per-segment reference (Best quality)"
+            }
+            current_mode = load_key("chatterbox_tts.voice_clone_mode")
+            selected_mode = st.selectbox(
+                "Voice Clone Mode",
+                options=list(mode_options.keys()),
+                format_func=lambda x: mode_options[x],
+                index=list(mode_options.keys()).index(current_mode),
+                help="Mode 1: Fast, no voice cloning. Mode 2: Clone using single reference. Mode 3: Clone per segment (slowest, best quality)"
+            )
+            if selected_mode != current_mode:
+                update_key("chatterbox_tts.voice_clone_mode", selected_mode)
+                st.rerun()
+
+            # Exaggeration control
+            exaggeration = st.slider(
+                "Exaggeration (Emotionality)",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(load_key("chatterbox_tts.exaggeration")),
+                step=0.1,
+                help="Control speech emotionality: 0.0=monotone, 0.5=balanced (recommended), 1.0=very expressive"
+            )
+            if exaggeration != load_key("chatterbox_tts.exaggeration"):
+                update_key("chatterbox_tts.exaggeration", exaggeration)
+                st.rerun()
+
+            # CFG weight (only for modes 2 and 3)
+            if selected_mode in [2, 3]:
+                cfg_weight = st.slider(
+                    "CFG Weight (Voice Clone Strength)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=float(load_key("chatterbox_tts.cfg_weight")),
+                    step=0.1,
+                    help="Influence of reference audio: 0.3-0.5 recommended for best results"
+                )
+                if cfg_weight != load_key("chatterbox_tts.cfg_weight"):
+                    update_key("chatterbox_tts.cfg_weight", cfg_weight)
+                    st.rerun()
+
+            # Device selection
+            device_options = ["cuda", "cpu"]
+            current_device = load_key("chatterbox_tts.device")
+            selected_device = st.selectbox(
+                "Device",
+                options=device_options,
+                index=device_options.index(current_device),
+                help="Use CUDA for GPU acceleration (faster) or CPU"
+            )
+            if selected_device != current_device:
+                update_key("chatterbox_tts.device", selected_device)
+                st.rerun()
+
 def check_api():
     try:
         resp = ask_gpt("This is a test, response 'message':'success' in json format.", 
