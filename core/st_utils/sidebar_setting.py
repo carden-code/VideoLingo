@@ -155,13 +155,44 @@ def page_setting():
         elif select_tts == "chatterbox_tts":
             st.info("📦 Install: `pip install chatterbox-tts soundfile`")
 
-            # Helper function to safely load config with defaults
+            # Initialize chatterbox_tts config section if it doesn't exist
+            def ensure_chatterbox_config():
+                """Ensure chatterbox_tts config section exists with defaults"""
+                try:
+                    load_key("chatterbox_tts")
+                except KeyError:
+                    # Section doesn't exist, create it with defaults
+                    from ruamel.yaml import YAML
+                    import threading
+
+                    yaml = YAML()
+                    yaml.preserve_quotes = True
+                    lock = threading.Lock()
+
+                    with lock:
+                        with open('config.yaml', 'r', encoding='utf-8') as file:
+                            data = yaml.load(file)
+
+                        # Add chatterbox_tts section with defaults
+                        data['chatterbox_tts'] = {
+                            'voice_clone_mode': 2,
+                            'exaggeration': 0.5,
+                            'cfg_weight': 0.4,
+                            'device': 'cuda'
+                        }
+
+                        with open('config.yaml', 'w', encoding='utf-8') as file:
+                            yaml.dump(data, file)
+
+            # Ensure config exists before loading
+            ensure_chatterbox_config()
+
+            # Helper function to safely load config
             def load_chatterbox_config(key, default):
                 try:
                     return load_key(f"chatterbox_tts.{key}")
                 except KeyError:
-                    # Initialize with default if key doesn't exist
-                    update_key(f"chatterbox_tts.{key}", default)
+                    # Key missing (shouldn't happen after ensure), use default
                     return default
 
             # Voice clone mode
