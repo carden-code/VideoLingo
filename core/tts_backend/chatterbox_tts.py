@@ -64,8 +64,12 @@ def get_language_code(language_name):
     """
     Map VideoLingo language names to Chatterbox language IDs
 
-    Supported languages: en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar,
-                         zh-cn, hu, ko, ja, hi, th, vi, id, he, uk, el
+    Supported languages (23 total):
+    - en (English), es (Spanish), fr (French), de (German), it (Italian)
+    - pt (Portuguese), pl (Polish), tr (Turkish), ru (Russian), nl (Dutch)
+    - cs (Czech), ar (Arabic), zh-cn (Chinese), hu (Hungarian), ko (Korean)
+    - ja (Japanese), hi (Hindi), th (Thai), vi (Vietnamese), id (Indonesian)
+    - he (Hebrew), uk (Ukrainian), el (Greek)
     """
     language_map = {
         # English
@@ -161,6 +165,36 @@ def get_language_code(language_name):
         'indonesian': 'id',
         '印尼语': 'id',
         'id': 'id',
+
+        # Czech
+        'czech': 'cs',
+        'čeština': 'cs',
+        '捷克语': 'cs',
+        'cs': 'cs',
+
+        # Hungarian
+        'hungarian': 'hu',
+        'magyar': 'hu',
+        '匈牙利语': 'hu',
+        'hu': 'hu',
+
+        # Hebrew
+        'hebrew': 'he',
+        'עברית': 'he',
+        '希伯来语': 'he',
+        'he': 'he',
+
+        # Ukrainian
+        'ukrainian': 'uk',
+        'українська': 'uk',
+        '乌克兰语': 'uk',
+        'uk': 'uk',
+
+        # Greek
+        'greek': 'el',
+        'ελληνικά': 'el',
+        '希腊语': 'el',
+        'el': 'el',
     }
 
     # Normalize input
