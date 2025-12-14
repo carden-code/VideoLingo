@@ -31,3 +31,6 @@ pypinyin
 g2p-en
 xmltodict
 
+# Chatterbox TTS - Open-source multilingual TTS with voice cloning
+chatterbox-tts
+soundfile
