@@ -45,7 +45,34 @@ def update_key(key, new_value):
             return True
         else:
             raise KeyError(f"Key '{keys[-1]}' not found in configuration")
-        
+
+def ensure_section(section_key, default_values):
+    """
+    Ensure a config section exists, creating it with defaults if missing.
+
+    Args:
+        section_key: Top-level section name (e.g., 'chatterbox_tts')
+        default_values: Dict of default key-value pairs for the section
+
+    Returns:
+        True if section already existed, False if it was created
+    """
+    with lock:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as file:
+            data = yaml.load(file)
+
+        # Check if section exists
+        if section_key in data:
+            return True  # Section already exists
+
+        # Create section with defaults
+        data[section_key] = default_values
+
+        with open(CONFIG_PATH, 'w', encoding='utf-8') as file:
+            yaml.dump(data, file)
+
+        return False  # Section was created
+
 # basic utils
 def get_joiner(language):
     if language in load_key('language_split_with_space'):
