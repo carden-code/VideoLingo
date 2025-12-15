@@ -52,6 +52,14 @@ def apply_alignment_bugfix():
             """Patched step method with empty matrix check"""
             import torch
 
+            # Initialize attributes if not present (first call)
+            if not hasattr(self, 'step_count'):
+                self.step_count = 0
+            if not hasattr(self, 'recent_tokens'):
+                self.recent_tokens = []
+            if not hasattr(self, 'completed_at'):
+                self.completed_at = 0
+
             # Call most of original logic but handle the problematic line
             self.step_count += 1
             last_token = next_token
