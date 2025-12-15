@@ -6,7 +6,6 @@ from typing import Tuple
 
 import pandas as pd
 import requests
-import torch
 from pydub import AudioSegment
 from rich.console import Console
 from rich.progress import Progress
@@ -50,6 +49,7 @@ def free_vram_for_tts():
 
     # 2. Clear CUDA cache
     try:
+        import torch  # Lazy import to avoid dependency on CPU-only setups
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             rprint("[green]✓ CUDA cache cleared[/green]")
