@@ -138,34 +138,59 @@ class ChatterboxModelPool:
 # Global model pool instance
 _model_pool: ChatterboxModelPool = None
 _pool_lock = threading.Lock()
+_atexit_registered = False
 
 
-def get_model_pool(pool_size: int = None, device: str = "cuda") -> ChatterboxModelPool:
+def get_model_pool(pool_size: int = None, device: str = None) -> ChatterboxModelPool:
     """
     Get or create the global model pool.
 
+    Automatically rebuilds pool if config values (pool_size, device) have changed.
+
     Args:
         pool_size: Number of models in pool (from config if None)
-        device: Device to use ('cuda' or 'cpu')
+        device: Device to use (from config if None)
 
     Returns:
         ChatterboxModelPool instance
     """
-    global _model_pool
+    global _model_pool, _atexit_registered
 
-    if _model_pool is None:
-        with _pool_lock:
-            if _model_pool is None:
-                if pool_size is None:
-                    try:
-                        chatterbox_config = load_key("chatterbox_tts")
-                        pool_size = chatterbox_config.get("pool_size", 4)
-                    except:
-                        pool_size = 4
+    # Load config values if not provided
+    try:
+        chatterbox_config = load_key("chatterbox_tts")
+        if pool_size is None:
+            pool_size = chatterbox_config.get("pool_size", 4)
+        if device is None:
+            device = chatterbox_config.get("device", "cuda")
+    except:
+        pool_size = pool_size or 4
+        device = device or "cuda"
 
-                _model_pool = ChatterboxModelPool(pool_size=pool_size, device=device)
-                # Register cleanup on exit
-                atexit.register(_model_pool.shutdown)
+    with _pool_lock:
+        # Check if we need to rebuild the pool (config changed)
+        if _model_pool is not None:
+            config_changed = (
+                _model_pool.pool_size != pool_size or
+                _model_pool.device != device
+            )
+            if config_changed and not _model_pool._initialized:
+                # Pool not yet initialized, just update settings
+                _model_pool.pool_size = pool_size
+                _model_pool.device = device
+            elif config_changed and _model_pool._initialized:
+                # Pool already initialized with different settings
+                rprint(f"[yellow]Config changed (pool_size: {_model_pool.pool_size}→{pool_size}, device: {_model_pool.device}→{device}), rebuilding pool...[/yellow]")
+                _model_pool.shutdown()
+                _model_pool = None
+
+        # Create new pool if needed
+        if _model_pool is None:
+            _model_pool = ChatterboxModelPool(pool_size=pool_size, device=device)
+            # Register cleanup on exit (only once)
+            if not _atexit_registered:
+                atexit.register(lambda: _model_pool.shutdown() if _model_pool else None)
+                _atexit_registered = True
 
     return _model_pool
 
@@ -389,7 +414,8 @@ def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exagger
 
     # Generate using pool or single model
     if use_pool:
-        pool = get_model_pool(device=device)
+        # Pool reads device from config, override only if explicitly specified
+        pool = get_model_pool(device=device if device != "cuda" else None)
         with pool.acquire() as model:
             wav, sample_rate = generate_with_model(model)
     else:
