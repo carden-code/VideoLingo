@@ -37,7 +37,8 @@ class ChatterboxModelPool:
     VRAM_PER_MODEL_GB = 3.25  # Empirically measured
 
     def __init__(self, pool_size: int = 4, device: str = "cuda"):
-        self.pool_size = pool_size
+        self.requested_pool_size = pool_size  # Config value (for comparison)
+        self.pool_size = pool_size  # Actual loaded count (may be lower due to OOM)
         self.device = device
         self._pool: Queue = None
         self._init_lock = threading.Lock()
@@ -170,17 +171,19 @@ def get_model_pool(pool_size: int = None, device: str = None) -> ChatterboxModel
     with _pool_lock:
         # Check if we need to rebuild the pool (config changed)
         if _model_pool is not None:
+            # Compare against requested_pool_size, not actual pool_size (which may be lower due to OOM)
             config_changed = (
-                _model_pool.pool_size != pool_size or
+                _model_pool.requested_pool_size != pool_size or
                 _model_pool.device != device
             )
             if config_changed and not _model_pool._initialized:
                 # Pool not yet initialized, just update settings
+                _model_pool.requested_pool_size = pool_size
                 _model_pool.pool_size = pool_size
                 _model_pool.device = device
             elif config_changed and _model_pool._initialized:
                 # Pool already initialized with different settings
-                rprint(f"[yellow]Config changed (pool_size: {_model_pool.pool_size}→{pool_size}, device: {_model_pool.device}→{device}), rebuilding pool...[/yellow]")
+                rprint(f"[yellow]Config changed (pool_size: {_model_pool.requested_pool_size}→{pool_size}, device: {_model_pool.device}→{device}), rebuilding pool...[/yellow]")
                 _model_pool.shutdown()
                 _model_pool = None
 
