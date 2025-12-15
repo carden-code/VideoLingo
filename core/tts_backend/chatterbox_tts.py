@@ -59,6 +59,10 @@ def apply_alignment_bugfix():
                 self.recent_tokens = []
             if not hasattr(self, 'completed_at'):
                 self.completed_at = 0
+            if not hasattr(self, 'A'):
+                self.A = None
+            if not hasattr(self, 'complete'):
+                self.complete = False
 
             # Call most of original logic but handle the problematic line
             self.step_count += 1
