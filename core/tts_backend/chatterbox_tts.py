@@ -26,110 +26,6 @@ def check_chatterbox_installed():
         )
 
 
-_alignment_patch_applied = False
-
-def apply_alignment_bugfix():
-    """
-    Monkey-patch fix for Chatterbox alignment_stream_analyzer bug.
-
-    Bug: IndexError in step() when alignment matrix is empty after forced EOS.
-    Location: chatterbox/models/t3/inference/alignment_stream_analyzer.py:139
-
-    Original code crashes on: A[self.completed_at:, :-5].max(dim=1)
-    when the sliced matrix has zero size.
-    """
-    global _alignment_patch_applied
-    if _alignment_patch_applied:
-        return
-
-    try:
-        from chatterbox.models.t3.inference import alignment_stream_analyzer
-
-        # Store original step method
-        original_step = alignment_stream_analyzer.AlignmentStreamAnalyzer.step
-
-        def patched_step(self, logits, next_token):
-            """Patched step method with empty matrix check"""
-            import torch
-
-            # Initialize attributes if not present (first call)
-            if not hasattr(self, 'step_count'):
-                self.step_count = 0
-            if not hasattr(self, 'recent_tokens'):
-                self.recent_tokens = []
-            if not hasattr(self, 'completed_at'):
-                self.completed_at = 0
-            if not hasattr(self, 'A'):
-                self.A = None
-            if not hasattr(self, 'complete'):
-                self.complete = False
-
-            # Call most of original logic but handle the problematic line
-            self.step_count += 1
-            last_token = next_token
-
-            if self.complete:
-                return logits
-
-            A = self.A
-            attn = self.get_attention()
-
-            if attn is not None:
-                if A is None:
-                    A = attn
-                else:
-                    A = torch.cat([A, attn], dim=0)
-                self.A = A
-
-            if A is None:
-                return logits
-
-            # Check completion conditions
-            alignment_complete = (A[:, -5:].sum() > 5)
-            if alignment_complete and not self.complete:
-                self.complete = True
-                self.completed_at = A.shape[0]
-
-            # Detect repetition patterns
-            long_tail = self.complete and (self.step_count - self.completed_at > 50)
-
-            # BUGFIX: Check matrix size before calling max()
-            sliced_A = A[self.completed_at:, :-5] if self.complete else torch.tensor([])
-            if sliced_A.numel() == 0 or sliced_A.shape[1] == 0:
-                alignment_repetition = False
-            else:
-                alignment_repetition = self.complete and (sliced_A.max(dim=1).values.sum() > 5)
-
-            # Check token repetition
-            self.recent_tokens.append(last_token)
-            if len(self.recent_tokens) > 10:
-                self.recent_tokens.pop(0)
-
-            token_repetition = False
-            if len(self.recent_tokens) >= 4:
-                last_4 = self.recent_tokens[-4:]
-                if last_4[0] == last_4[2] and last_4[1] == last_4[3]:
-                    import logging
-                    logging.warning(f"🚨 Detected 2x repetition of token {last_4[0]}")
-                    token_repetition = True
-
-            # Force EOS if needed
-            if long_tail or alignment_repetition or token_repetition:
-                import logging
-                logging.warning(f"forcing EOS token, long_tail={long_tail}, alignment_repetition={alignment_repetition}, token_repetition={token_repetition}")
-                logits[:, self.eos_token] = 1e9
-
-            return logits
-
-        # Apply patch
-        alignment_stream_analyzer.AlignmentStreamAnalyzer.step = patched_step
-        _alignment_patch_applied = True
-        rprint("[green]✓ Applied Chatterbox alignment bugfix[/green]")
-
-    except Exception as e:
-        rprint(f"[yellow]⚠ Could not apply Chatterbox bugfix: {e}[/yellow]")
-
-
 class ChatterboxModelPool:
     """
     Thread-safe pool of Chatterbox models for parallel TTS generation.
@@ -159,7 +55,6 @@ class ChatterboxModelPool:
                 return
 
             check_chatterbox_installed()
-            apply_alignment_bugfix()  # Fix IndexError in alignment_stream_analyzer
 
             # Auto-detect device
             if self.device == "cuda" and not torch.cuda.is_available():
@@ -316,7 +211,6 @@ def get_chatterbox_model(multilingual=False, device="cuda"):
     global _chatterbox_model, _chatterbox_multilingual_model
 
     check_chatterbox_installed()
-    apply_alignment_bugfix()  # Fix IndexError in alignment_stream_analyzer
 
     if device == "cuda" and not torch.cuda.is_available():
         rprint("[yellow]CUDA not available, falling back to CPU[/yellow]")
@@ -559,6 +453,11 @@ def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exagger
 
     def generate_with_model(model):
         """Generate audio with a given model instance"""
+        # Reset model state before each generation to prevent tensor contamination
+        # See: https://github.com/resemble-ai/chatterbox/issues/201
+        if hasattr(model, 'reset'):
+            model.reset()
+
         if audio_prompt and Path(audio_prompt).exists():
             rprint(f"[cyan]Using voice cloning with reference: {audio_prompt}[/cyan]")
             wav = model.generate(
