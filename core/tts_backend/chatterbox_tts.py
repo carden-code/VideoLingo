@@ -546,6 +546,8 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
     - Mode 2: Voice cloning with single reference audio
     - Mode 3: Voice cloning with per-segment reference audio
 
+    Falls back to edge_tts if Chatterbox fails (e.g., on very short text).
+
     Args:
         text: Text to synthesize
         save_as: Output file path
@@ -606,7 +608,7 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
                 rprint(f"[bold red]Failed to extract reference audio: {str(e)}[/bold red]")
                 rprint("[yellow]Continuing without voice cloning...[/yellow]")
 
-    # Generate TTS
+    # Generate TTS with fallback to edge_tts
     try:
         success = chatterbox_tts(
             text=text,
@@ -619,4 +621,16 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
         )
         return success
     except Exception as e:
-        raise Exception(f"Chatterbox TTS failed: {str(e)}")
+        # Log the error and fall back to edge_tts
+        rprint(f"[bold yellow]⚠️ FALLBACK: Chatterbox failed for segment {number}: {str(e)}[/bold yellow]")
+        rprint(f"[bold yellow]⚠️ FALLBACK: Text was: '{text}'[/bold yellow]")
+        rprint(f"[bold cyan]🔄 FALLBACK: Switching to edge_tts for this segment (no voice cloning)[/bold cyan]")
+
+        try:
+            from core.tts_backend.edge_tts import edge_tts
+            edge_tts(text, save_as)
+            rprint(f"[bold green]✓ FALLBACK: edge_tts succeeded for segment {number}[/bold green]")
+            return True
+        except Exception as edge_error:
+            rprint(f"[bold red]❌ FALLBACK: edge_tts also failed: {str(edge_error)}[/bold red]")
+            raise Exception(f"Both Chatterbox and edge_tts failed for segment {number}: Chatterbox: {str(e)}, edge_tts: {str(edge_error)}")

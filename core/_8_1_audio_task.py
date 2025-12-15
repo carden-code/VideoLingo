@@ -15,6 +15,11 @@ TRANS_SUBS_FOR_AUDIO_FILE = 'output/audio/trans_subs_for_audio.srt'
 SRC_SUBS_FOR_AUDIO_FILE = 'output/audio/src_subs_for_audio.srt'
 ESTIMATOR = None
 
+# Minimum words for TTS - short texts cause Chatterbox issues (token repetition, empty alignment)
+MIN_WORDS_FOR_TTS = 3
+# Maximum gap (seconds) to consider merging with neighbor
+MAX_MERGE_GAP = 3.0
+
 def check_len_then_trim(text, duration):
     global ESTIMATOR
     if ESTIMATOR is None:
@@ -48,6 +53,141 @@ def time_diff_seconds(t1, t2, base_date):
     dt1 = datetime.datetime.combine(base_date, t1)
     dt2 = datetime.datetime.combine(base_date, t2)
     return (dt2 - dt1).total_seconds()
+
+
+def count_words(text):
+    """
+    Count words in text, handling both space-separated and CJK languages.
+    For CJK (Chinese, Japanese, Korean), count characters as "words".
+    """
+    if not text or not isinstance(text, str):
+        return 0
+
+    text = text.strip()
+
+    # Check if text contains CJK characters
+    cjk_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or  # Chinese
+                   '\u3040' <= c <= '\u309f' or  # Hiragana
+                   '\u30a0' <= c <= '\u30ff' or  # Katakana
+                   '\uac00' <= c <= '\ud7af')    # Korean
+
+    if cjk_chars > len(text) * 0.3:  # Mostly CJK
+        # For CJK, count characters (excluding spaces and punctuation)
+        return sum(1 for c in text if c.isalnum())
+    else:
+        # For space-separated languages, count words
+        return len(text.split())
+
+
+def should_merge_with_neighbor(df, i, today, min_words=MIN_WORDS_FOR_TTS, max_gap=MAX_MERGE_GAP):
+    """
+    Decide which neighbor to merge with for short text segments.
+
+    Priority: NEXT segment (short replies usually relate to following phrase in speech)
+
+    Args:
+        df: DataFrame with subtitles
+        i: Current row index
+        today: Date for time calculations
+        min_words: Minimum word count threshold
+        max_gap: Maximum gap in seconds to consider merging
+
+    Returns:
+        'next', 'prev', or None (if no merge needed or possible)
+    """
+    text = df.loc[i, 'text'].strip()
+    word_count = count_words(text)
+
+    if word_count >= min_words:
+        return None  # Text is long enough
+
+    # Calculate gaps to neighbors
+    gap_to_prev = float('inf')
+    gap_to_next = float('inf')
+
+    if i > 0:
+        prev_end = df.loc[i - 1, 'end_time']
+        curr_start = df.loc[i, 'start_time']
+        gap_to_prev = time_diff_seconds(prev_end, curr_start, today)
+
+    if i < len(df) - 1:
+        curr_end = df.loc[i, 'end_time']
+        next_start = df.loc[i + 1, 'start_time']
+        gap_to_next = time_diff_seconds(curr_end, next_start, today)
+
+    # Priority: next segment (speech context usually flows forward)
+    if gap_to_next <= max_gap:
+        return 'next'
+    elif gap_to_prev <= max_gap:
+        return 'prev'
+
+    return None  # Both neighbors too far - will rely on monkey-patch fallback
+
+
+def merge_short_text_segments(df):
+    """
+    Merge segments with too few words to prevent TTS issues.
+
+    Short texts (< MIN_WORDS_FOR_TTS words) can cause:
+    - Token repetition in Chatterbox
+    - Empty alignment matrices
+    - IndexError crashes
+
+    Returns:
+        Modified DataFrame with short segments merged
+    """
+    today = datetime.date.today()
+    merged_count = 0
+
+    i = 0
+    while i < len(df):
+        merge_direction = should_merge_with_neighbor(df, i, today)
+
+        if merge_direction == 'next' and i < len(df) - 1:
+            # Merge current with next
+            word_count = count_words(df.loc[i, 'text'])
+            rprint(f"[bold magenta]📝 Short text merge: '{df.loc[i, 'text']}' ({word_count} words) → merging with NEXT segment[/bold magenta]")
+
+            df.loc[i + 1, 'text'] = df.loc[i, 'text'] + ' ' + df.loc[i + 1, 'text']
+            df.loc[i + 1, 'origin'] = df.loc[i, 'origin'] + ' ' + df.loc[i + 1, 'origin']
+            df.loc[i + 1, 'start_time'] = df.loc[i, 'start_time']
+            df.loc[i + 1, 'duration'] = time_diff_seconds(
+                df.loc[i + 1, 'start_time'],
+                df.loc[i + 1, 'end_time'],
+                today
+            )
+            df = df.drop(i).reset_index(drop=True)
+            merged_count += 1
+            # Don't increment i - check the merged result
+
+        elif merge_direction == 'prev' and i > 0:
+            # Merge current with previous
+            word_count = count_words(df.loc[i, 'text'])
+            rprint(f"[bold magenta]📝 Short text merge: '{df.loc[i, 'text']}' ({word_count} words) → merging with PREV segment[/bold magenta]")
+
+            df.loc[i - 1, 'text'] = df.loc[i - 1, 'text'] + ' ' + df.loc[i, 'text']
+            df.loc[i - 1, 'origin'] = df.loc[i - 1, 'origin'] + ' ' + df.loc[i, 'origin']
+            df.loc[i - 1, 'end_time'] = df.loc[i, 'end_time']
+            df.loc[i - 1, 'duration'] = time_diff_seconds(
+                df.loc[i - 1, 'start_time'],
+                df.loc[i - 1, 'end_time'],
+                today
+            )
+            df = df.drop(i).reset_index(drop=True)
+            merged_count += 1
+            # Don't increment i - recheck from same position
+
+        else:
+            if merge_direction is None and count_words(df.loc[i, 'text']) < MIN_WORDS_FOR_TTS:
+                word_count = count_words(df.loc[i, 'text'])
+                rprint(f"[bold yellow]⚠️ Short text '{df.loc[i, 'text']}' ({word_count} words) - no close neighbor, keeping as-is (fallback will handle)[/bold yellow]")
+            i += 1
+
+    if merged_count > 0:
+        rprint(f"[bold green]✓ Merged {merged_count} short text segments[/bold green]")
+
+    return df
+
 
 def process_srt():
     """Process srt file, generate audio tasks"""
@@ -98,7 +238,12 @@ def process_srt():
         subtitles.append({'number': number, 'start_time': start_time, 'end_time': end_time, 'duration': duration, 'text': text, 'origin': origin})
     
     df = pd.DataFrame(subtitles)
-    
+
+    # 🔄 First pass: Merge short TEXT segments (prevents TTS issues with short words)
+    rprint("[bold cyan]📝 Checking for short text segments to merge...[/bold cyan]")
+    df = merge_short_text_segments(df)
+
+    # 🔄 Second pass: Merge short DURATION segments (existing logic)
     i = 0
     MIN_SUB_DUR = load_key("min_subtitle_duration")
     while i < len(df):
