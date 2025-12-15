@@ -18,13 +18,28 @@ fi
 
 # Step 1: Install build dependencies first (numpy needed for pkuseg build)
 echo ""
-echo "[1/2] Installing build dependencies (numpy, cython)..."
+echo "[1/4] Installing build dependencies (numpy, cython)..."
 pip install numpy==1.25.2 cython
 
 # Step 2: Install all other dependencies
 echo ""
-echo "[2/2] Installing all dependencies from requirements.txt..."
+echo "[2/4] Installing all dependencies from requirements.txt..."
 pip install -r requirements.txt
+
+# Step 3: Install Ollama (if not already installed)
+echo ""
+echo "[3/4] Setting up Ollama..."
+if command -v ollama &> /dev/null; then
+    echo "Ollama is already installed"
+else
+    echo "Installing Ollama..."
+    curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+# Step 4: Pull LLM model
+echo ""
+echo "[4/4] Pulling qwen2.5:14b model (this may take a while)..."
+ollama pull qwen2.5:14b
 
 echo ""
 echo "=== Installation complete! ==="
