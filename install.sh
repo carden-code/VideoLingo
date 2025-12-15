@@ -6,6 +6,10 @@ set -e  # Exit on error
 
 echo "=== VideoLingo Installation ==="
 
+# Install system dependencies (needed for building some packages)
+echo "[0/6] Installing system dependencies..."
+sudo apt-get update && sudo apt-get install -y python3-dev ffmpeg
+
 # Check if we're in a virtual environment
 if [ -z "$VIRTUAL_ENV" ]; then
     echo "Warning: No virtual environment detected. Consider activating one first."
@@ -29,6 +33,7 @@ pip install torch>=2.0.0 torchaudio==2.6.0
 # Step 3: Install whisperx first (brings faster-whisper with older tokenizers)
 echo ""
 echo "[3/6] Installing whisperx (audio transcription)..."
+pip install av==12.3.0  # Pre-built wheels, install before whisperx
 pip install "whisperx @ git+https://github.com/m-bain/whisperx.git@7307306a9d8dd0d261e588cc933322454f853853"
 
 # Step 4: Install chatterbox-tts (will upgrade tokenizers - works at runtime despite pip warnings)
