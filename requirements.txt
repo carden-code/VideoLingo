@@ -2,6 +2,10 @@
 numpy==1.25.2
 cython
 
+# === PyTorch (pin versions for chatterbox-tts compatibility) ===
+torch>=2.0.0
+torchaudio==2.6.0
+
 # === Core dependencies ===
 librosa==0.11.0
 pytorch-lightning==2.3.3
@@ -28,7 +32,7 @@ ctranslate2==4.4.0
 edge-tts
 
 # === Audio processing ===
-demucs[dev] @ git+https://github.com/adefossez/demucs
+demucs
 faster-whisper
 pyannote.audio==3.1.1
 whisperx @ git+https://github.com/m-bain/whisperx.git@7307306a9d8dd0d261e588cc933322454f853853
