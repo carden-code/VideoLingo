@@ -1,10 +1,13 @@
+# === Build dependencies (install first) ===
+numpy==1.25.2
+cython
+
+# === Core dependencies ===
 librosa==0.10.2.post1
 pytorch-lightning==2.3.3
 lightning==2.3.3
 transformers==4.39.3
 moviepy==1.0.3
-# numpy version managed by chatterbox (requires <1.26.0)
-numpy>=1.24.0,<1.26.0
 openai==1.55.3
 opencv-python==4.10.0.84
 openpyxl==3.1.5
@@ -24,19 +27,18 @@ autocorrect-py
 ctranslate2==4.4.0
 edge-tts
 
-# Audio processing - install demucs first
+# === Audio processing ===
 demucs[dev] @ git+https://github.com/adefossez/demucs
-
-# WhisperX - Note: may need manual install with --no-deps if numpy conflicts
-# pip install git+https://github.com/m-bain/whisperx.git --no-deps
 faster-whisper
 pyannote.audio>=3.1.1
+whisperx @ git+https://github.com/m-bain/whisperx.git@7307306a9d8dd0d261e588cc933322454f853853
 
+# === TTS dependencies ===
 syllables
 pypinyin
 g2p-en
 xmltodict
-
-# Chatterbox TTS - Open-source multilingual TTS with voice cloning
-chatterbox-tts
 soundfile
+
+# === Chatterbox TTS ===
+chatterbox-tts
