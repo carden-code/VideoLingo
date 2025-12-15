@@ -30,7 +30,7 @@ edge-tts==6.1.12
 aiohttp==3.9.5
 
 # === Audio processing ===
-demucs==4.0.1
+demucs @ git+https://github.com/facebookresearch/demucs.git
 av==12.3.0
 pyannote.audio==3.1.1
 
