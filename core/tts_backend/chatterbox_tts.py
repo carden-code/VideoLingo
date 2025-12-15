@@ -378,6 +378,62 @@ def get_language_code(language_name):
     rprint(f"[yellow]Language '{language_name}' not found in map, defaulting to 'en'[/yellow]")
     return 'en'
 
+
+def find_optimal_reference(min_duration: float = 5.0, max_duration: float = 10.0, fallback_min: float = 3.0) -> str:
+    """
+    Find optimal reference audio for Chatterbox voice cloning.
+
+    Chatterbox works best with reference audio between 5-10 seconds.
+    Short references (<3s) can cause alignment errors.
+
+    Args:
+        min_duration: Ideal minimum duration (default 5.0s)
+        max_duration: Ideal maximum duration (default 10.0s)
+        fallback_min: Minimum acceptable duration if no ideal found (default 3.0s)
+
+    Returns:
+        Path to optimal reference audio, or None if none suitable found
+    """
+    from core.asr_backend.audio_preprocess import get_audio_duration
+
+    refers_dir = Path.cwd() / "output/audio/refers"
+    if not refers_dir.exists():
+        return None
+
+    ref_files = list(refers_dir.glob("*.wav"))
+    if not ref_files:
+        return None
+
+    # Sort by segment number to process in order
+    ref_files.sort(key=lambda x: int(x.stem) if x.stem.isdigit() else 999)
+
+    best_ref = None
+    best_duration = 0
+
+    for ref_file in ref_files:
+        try:
+            duration = get_audio_duration(str(ref_file))
+        except Exception:
+            continue
+
+        # Ideal: 5-10 seconds - return immediately
+        if min_duration <= duration <= max_duration:
+            rprint(f"[green]✓ Found optimal reference: {ref_file.name} ({duration:.1f}s)[/green]")
+            return str(ref_file)
+
+        # Track longest acceptable for fallback (>= 3s)
+        if duration >= fallback_min and duration > best_duration:
+            best_ref = str(ref_file)
+            best_duration = duration
+
+    if best_ref:
+        rprint(f"[yellow]Using best available reference: {Path(best_ref).name} ({best_duration:.1f}s)[/yellow]")
+    else:
+        rprint(f"[red]No reference audio >= {fallback_min}s found[/red]")
+
+    return best_ref
+
+
 def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exaggeration=0.5, cfg_weight=0.4, device="cuda", use_pool=True):
     """
     Generate speech using Chatterbox TTS
@@ -475,20 +531,19 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
     current_dir = Path.cwd()
 
     if VOICE_CLONE_MODE == 2:
-        # Use single reference audio for all segments
-        ref_path = current_dir / "output/audio/refers/1.wav"
-        if ref_path.exists():
-            audio_prompt = str(ref_path)
-        else:
-            rprint(f"[yellow]Reference audio not found at {ref_path}, extracting...[/yellow]")
+        # Use optimal reference audio for all segments (5-10s ideal, 3s minimum)
+        refers_dir = current_dir / "output/audio/refers"
+        if not refers_dir.exists() or not list(refers_dir.glob("*.wav")):
+            rprint("[yellow]Reference audio not found, extracting...[/yellow]")
             try:
                 from core._9_refer_audio import extract_refer_audio_main
                 extract_refer_audio_main()
-                if ref_path.exists():
-                    audio_prompt = str(ref_path)
             except Exception as e:
                 rprint(f"[bold red]Failed to extract reference audio: {str(e)}[/bold red]")
                 rprint("[yellow]Continuing without voice cloning...[/yellow]")
+
+        # Find optimal reference (5-10s ideal, 3s minimum fallback)
+        audio_prompt = find_optimal_reference()
 
     elif VOICE_CLONE_MODE == 3:
         # Use per-segment reference audio
@@ -503,11 +558,9 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
                 if ref_path.exists():
                     audio_prompt = str(ref_path)
                 else:
-                    # Fallback to mode 2
-                    rprint("[yellow]Falling back to mode 2 (single reference)...[/yellow]")
-                    ref_path = current_dir / "output/audio/refers/1.wav"
-                    if ref_path.exists():
-                        audio_prompt = str(ref_path)
+                    # Fallback to optimal reference selection
+                    rprint("[yellow]Falling back to optimal reference selection...[/yellow]")
+                    audio_prompt = find_optimal_reference()
             except Exception as e:
                 rprint(f"[bold red]Failed to extract reference audio: {str(e)}[/bold red]")
                 rprint("[yellow]Continuing without voice cloning...[/yellow]")
