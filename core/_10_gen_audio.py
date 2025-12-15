@@ -5,6 +5,8 @@ import subprocess
 from typing import Tuple
 
 import pandas as pd
+import requests
+import torch
 from pydub import AudioSegment
 from rich.console import Console
 from rich.progress import Progress
@@ -16,6 +18,43 @@ from core.asr_backend.audio_preprocess import get_audio_duration
 from core.tts_backend.tts_main import tts_main
 
 console = Console()
+
+
+def free_vram_for_tts():
+    """
+    Free VRAM before TTS generation by unloading Ollama model and clearing CUDA cache.
+
+    This is necessary because Ollama keeps the LLM model (~10GB) in VRAM after translation,
+    which conflicts with Chatterbox Model Pool (~13-15GB) on limited VRAM GPUs.
+    """
+    # 1. Unload Ollama model if using local Ollama
+    try:
+        base_url = load_key("api.base_url")
+        model_name = load_key("api.model")
+
+        # Check if using local Ollama (localhost:11434)
+        if "localhost:11434" in base_url or "127.0.0.1:11434" in base_url:
+            rprint(f"[cyan]🔄 Unloading Ollama model '{model_name}' to free VRAM...[/cyan]")
+            response = requests.post(
+                f"{base_url}/api/generate",
+                json={"model": model_name, "keep_alive": 0},
+                timeout=30
+            )
+            if response.status_code == 200:
+                rprint("[green]✓ Ollama model unloaded successfully[/green]")
+            else:
+                rprint(f"[yellow]⚠ Ollama unload returned status {response.status_code}[/yellow]")
+    except Exception as e:
+        # Non-critical error - continue anyway
+        rprint(f"[dim]Ollama unload skipped: {e}[/dim]")
+
+    # 2. Clear CUDA cache
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            rprint("[green]✓ CUDA cache cleared[/green]")
+    except Exception as e:
+        rprint(f"[dim]CUDA cache clear skipped: {e}[/dim]")
 
 TEMP_FILE_TEMPLATE = f"{_AUDIO_TMP_DIR}/{{}}_temp.wav"
 OUTPUT_FILE_TEMPLATE = f"{_AUDIO_SEGS_DIR}/{{}}.wav"
@@ -209,7 +248,10 @@ def merge_chunks(tasks_df: pd.DataFrame) -> pd.DataFrame:
 def gen_audio() -> None:
     """Main function: Generate audio and process timeline"""
     rprint("[bold magenta]🚀 Starting audio generation process...[/bold magenta]")
-    
+
+    # 🧹 Step0: Free VRAM from Ollama before loading TTS models
+    free_vram_for_tts()
+
     # 🎯 Step1: Create necessary directories
     os.makedirs(_AUDIO_TMP_DIR, exist_ok=True)
     os.makedirs(_AUDIO_SEGS_DIR, exist_ok=True)
