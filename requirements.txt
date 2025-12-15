@@ -10,7 +10,7 @@ torchaudio==2.6.0
 librosa==0.11.0
 pytorch-lightning==2.3.3
 lightning==2.3.3
-transformers==4.39.3
+transformers==4.46.3
 moviepy==1.0.3
 openai==1.55.3
 opencv-python==4.10.0.84
