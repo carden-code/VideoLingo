@@ -130,6 +130,9 @@ chatterbox_tts:
   cfg_weight: 0.4
   # Device to use: 'cuda' for GPU, 'cpu' for CPU
   device: 'cuda'
+  # Number of models in pool for parallel generation (~3.25GB VRAM each)
+  # Set to 1 for single-threaded mode, 4 recommended for RTX 3090 (24GB)
+  pool_size: 4
 
 # *Audio speed range
 speed_factor:

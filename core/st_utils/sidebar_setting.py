@@ -161,7 +161,8 @@ def page_setting():
                 'voice_clone_mode': 2,
                 'exaggeration': 0.5,
                 'cfg_weight': 0.4,
-                'device': 'cuda'
+                'device': 'cuda',
+                'pool_size': 4
             })
 
             # Helper function to safely load config
@@ -230,6 +231,20 @@ def page_setting():
             )
             if selected_device != current_device:
                 update_key("chatterbox_tts.device", selected_device)
+                st.rerun()
+
+            # Pool size for parallel generation
+            current_pool_size = load_chatterbox_config("pool_size", 4)
+            pool_size = st.number_input(
+                "Model Pool Size",
+                min_value=1,
+                max_value=8,
+                value=int(current_pool_size),
+                step=1,
+                help="Number of models for parallel TTS (~3.25GB VRAM each). 4 recommended for RTX 3090 (24GB), 1 for single-threaded mode"
+            )
+            if pool_size != current_pool_size:
+                update_key("chatterbox_tts.pool_size", pool_size)
                 st.rerun()
 
 def check_api():
