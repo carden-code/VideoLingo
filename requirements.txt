@@ -35,7 +35,7 @@ aiohttp==3.9.5
 # === Audio processing ===
 demucs==4.0.1
 av==12.3.0
-faster-whisper==1.0.3
+faster-whisper==1.0.0
 pyannote.audio==3.1.1
 whisperx @ git+https://github.com/m-bain/whisperx.git@7307306a9d8dd0d261e588cc933322454f853853
 
