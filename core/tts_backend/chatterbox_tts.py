@@ -1,73 +1,42 @@
 """
-Chatterbox TTS Integration for VideoLingo
-Supports multilingual TTS with zero-shot voice cloning
-GitHub: https://github.com/resemble-ai/chatterbox
+Chatterbox TTS HTTP Client for VideoLingo
+Connects to Chatterbox TTS API (https://github.com/travisvn/chatterbox-tts-api)
 
-Simplified for single-GPU deployment (no model pool).
+Supports multilingual TTS with zero-shot voice cloning via REST API.
 """
 
 from pathlib import Path
-import torch
+import requests
+import hashlib
 from core.utils import *
 
+# Cache for uploaded voice IDs (voice_path -> voice_name)
+_uploaded_voices = {}
 
-def check_chatterbox_installed():
-    """Check if chatterbox-tts is installed"""
+
+def get_api_url():
+    """Get Chatterbox API URL from config"""
+    config = load_key("chatterbox_tts")
+    return config.get("api_url", "http://localhost:4123")
+
+
+def check_api_health():
+    """Check if Chatterbox API is available"""
+    api_url = get_api_url()
     try:
-        import chatterbox
-        return True
-    except ImportError:
-        raise ImportError(
-            "Chatterbox TTS is not installed. Please install it using:\n"
-            "pip install chatterbox-tts\n"
-            "or from source:\n"
-            "git clone https://github.com/resemble-ai/chatterbox.git && cd chatterbox && pip install -e ."
-        )
+        response = requests.get(f"{api_url}/health", timeout=5)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
 
-
-# Single model cache (lazy loaded)
-_chatterbox_model = None
-_chatterbox_multilingual_model = None
-
-def get_chatterbox_model(multilingual=False, device="cuda"):
-    """
-    Get or initialize a single Chatterbox model.
-
-    Model is cached globally for reuse across multiple TTS calls.
-    """
-    global _chatterbox_model, _chatterbox_multilingual_model
-
-    check_chatterbox_installed()
-
-    if device == "cuda" and not torch.cuda.is_available():
-        rprint("[yellow]CUDA not available, falling back to CPU[/yellow]")
-        device = "cpu"
-
-    if multilingual:
-        if _chatterbox_multilingual_model is None:
-            rprint(f"[bold cyan]Loading Chatterbox Multilingual model on {device}...[/bold cyan]")
-            from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-            _chatterbox_multilingual_model = ChatterboxMultilingualTTS.from_pretrained(device=device)
-            rprint("[bold green]✓ Chatterbox Multilingual model loaded successfully[/bold green]")
-        return _chatterbox_multilingual_model
-    else:
-        if _chatterbox_model is None:
-            rprint(f"[bold cyan]Loading Chatterbox model on {device}...[/bold cyan]")
-            from chatterbox.tts import ChatterboxTTS
-            _chatterbox_model = ChatterboxTTS.from_pretrained(device=device)
-            rprint("[bold green]✓ Chatterbox model loaded successfully[/bold green]")
-        return _chatterbox_model
 
 def get_language_code(language_name):
     """
     Map VideoLingo language names to Chatterbox language IDs
 
-    Supported languages (23 total):
-    - en (English), es (Spanish), fr (French), de (German), it (Italian)
-    - pt (Portuguese), pl (Polish), tr (Turkish), ru (Russian), nl (Dutch)
-    - cs (Czech), ar (Arabic), zh (Chinese), hu (Hungarian), ko (Korean)
-    - ja (Japanese), hi (Hindi), th (Thai), vi (Vietnamese), id (Indonesian)
-    - he (Hebrew), uk (Ukrainian), el (Greek)
+    Supported languages (22 total):
+    ar, da, de, el, en, es, fi, fr, he, hi, it, ja, ko, ms, nl, no, pl, pt, ru, sv, sw, tr
+    Plus zh (Chinese) - may need to be enabled in API
     """
     language_map = {
         # English
@@ -149,50 +118,53 @@ def get_language_code(language_name):
         '印地语': 'hi',
         'hi': 'hi',
 
-        # Thai
-        'thai': 'th',
-        '泰语': 'th',
-        'th': 'th',
-
-        # Vietnamese
-        'vietnamese': 'vi',
-        '越南语': 'vi',
-        'vi': 'vi',
-
-        # Indonesian
-        'indonesian': 'id',
-        '印尼语': 'id',
-        'id': 'id',
-
-        # Czech
-        'czech': 'cs',
-        'čeština': 'cs',
-        '捷克语': 'cs',
-        'cs': 'cs',
-
-        # Hungarian
-        'hungarian': 'hu',
-        'magyar': 'hu',
-        '匈牙利语': 'hu',
-        'hu': 'hu',
-
         # Hebrew
         'hebrew': 'he',
         'עברית': 'he',
         '希伯来语': 'he',
         'he': 'he',
 
-        # Ukrainian
-        'ukrainian': 'uk',
-        'українська': 'uk',
-        '乌克兰语': 'uk',
-        'uk': 'uk',
+        # Ukrainian - not in API list, fallback to Russian
+        'ukrainian': 'ru',
+        'українська': 'ru',
+        '乌克兰语': 'ru',
+        'uk': 'ru',
 
         # Greek
         'greek': 'el',
         'ελληνικά': 'el',
         '希腊语': 'el',
         'el': 'el',
+
+        # Finnish
+        'finnish': 'fi',
+        '芬兰语': 'fi',
+        'fi': 'fi',
+
+        # Swedish
+        'swedish': 'sv',
+        '瑞典语': 'sv',
+        'sv': 'sv',
+
+        # Norwegian
+        'norwegian': 'no',
+        '挪威语': 'no',
+        'no': 'no',
+
+        # Danish
+        'danish': 'da',
+        '丹麦语': 'da',
+        'da': 'da',
+
+        # Malay
+        'malay': 'ms',
+        '马来语': 'ms',
+        'ms': 'ms',
+
+        # Swahili
+        'swahili': 'sw',
+        '斯瓦希里语': 'sw',
+        'sw': 'sw',
     }
 
     # Normalize input
@@ -204,6 +176,73 @@ def get_language_code(language_name):
     # Default to English if not found
     rprint(f"[yellow]Language '{language_name}' not found in map, defaulting to 'en'[/yellow]")
     return 'en'
+
+
+def upload_voice(voice_path: str, language_id: str) -> str:
+    """
+    Upload voice sample to Chatterbox API for voice cloning.
+
+    Args:
+        voice_path: Path to voice sample audio file
+        language_id: ISO 639-1 language code (e.g., 'ru', 'en')
+
+    Returns:
+        voice_name for use in TTS requests
+    """
+    global _uploaded_voices
+
+    api_url = get_api_url()
+
+    # Generate unique voice name based on full file hash
+    with open(voice_path, 'rb') as f:
+        file_hash = hashlib.md5(f.read()).hexdigest()[:12]
+    voice_name = f"vl_{language_id}_{file_hash}"
+
+    # Check cache (includes hash so changed files get re-uploaded)
+    cache_key = f"{voice_path}:{language_id}:{file_hash}"
+    if cache_key in _uploaded_voices:
+        return _uploaded_voices[cache_key]
+
+    # Check if voice already exists
+    try:
+        response = requests.get(f"{api_url}/voices", timeout=10)
+        if response.status_code == 200:
+            voices = response.json()
+            if isinstance(voices, list):
+                for v in voices:
+                    if v.get('name') == voice_name:
+                        rprint(f"[cyan]Voice '{voice_name}' already uploaded[/cyan]")
+                        _uploaded_voices[cache_key] = voice_name
+                        return voice_name
+    except requests.RequestException:
+        pass
+
+    # Upload new voice
+    rprint(f"[cyan]Uploading voice '{voice_name}' with language '{language_id}'...[/cyan]")
+
+    with open(voice_path, 'rb') as f:
+        files = {'voice_file': (Path(voice_path).name, f, 'audio/wav')}
+        data = {'voice_name': voice_name, 'language': language_id}
+
+        try:
+            response = requests.post(
+                f"{api_url}/voices",
+                files=files,
+                data=data,
+                timeout=30
+            )
+
+            if response.status_code in (200, 201):
+                rprint(f"[bold green]✓ Voice uploaded: {voice_name}[/bold green]")
+                _uploaded_voices[cache_key] = voice_name
+                return voice_name
+            else:
+                rprint(f"[yellow]Voice upload failed ({response.status_code}): {response.text}[/yellow]")
+                return None
+
+        except requests.RequestException as e:
+            rprint(f"[yellow]Voice upload error: {e}[/yellow]")
+            return None
 
 
 def find_optimal_reference(min_duration: float = 5.0, max_duration: float = 10.0, fallback_min: float = 3.0) -> str:
@@ -261,66 +300,92 @@ def find_optimal_reference(min_duration: float = 5.0, max_duration: float = 10.0
     return best_ref
 
 
-def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exaggeration=0.5, cfg_weight=0.4, device="cuda"):
+def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exaggeration=0.5, cfg_weight=0.4):
     """
-    Generate speech using Chatterbox TTS
+    Generate speech using Chatterbox TTS API
 
     Args:
         text: Text to synthesize
         save_path: Path to save the generated audio
         language_id: Language code (e.g., 'en', 'zh', 'ja')
         audio_prompt: Optional path to reference audio for voice cloning
-        exaggeration: Control emotionality (0.0-1.0, default 0.5)
+        exaggeration: Control emotionality (0.25-2.0, default 0.5)
         cfg_weight: Influence of audio prompt (0.0-1.0, default 0.4)
-        device: Device to use ('cuda' or 'cpu')
     """
-    import soundfile as sf
+    api_url = get_api_url()
 
-    # Get cached model (lazy loaded)
-    model = get_chatterbox_model(multilingual=True, device=device)
+    # Check API health
+    if not check_api_health():
+        raise ConnectionError(f"Chatterbox API not available at {api_url}")
 
-    # Reset model state before each generation to prevent tensor contamination
-    # See: https://github.com/resemble-ai/chatterbox/issues/201
-    if hasattr(model, 'reset'):
-        model.reset()
-
-    # Generate audio
-    if audio_prompt and Path(audio_prompt).exists():
-        rprint(f"[cyan]Using voice cloning with reference: {audio_prompt}[/cyan]")
-        wav = model.generate(
-            text,
-            language_id=language_id,
-            audio_prompt_path=audio_prompt,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight
-        )
-    else:
-        rprint(f"[cyan]Generating audio for language: {language_id}[/cyan]")
-        wav = model.generate(
-            text,
-            language_id=language_id,
-            exaggeration=exaggeration
-        )
-
-    sample_rate = model.sr if hasattr(model, 'sr') else 24000
-
-    # Save audio file
     save_path = Path(save_path)
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert tensor to numpy if needed
-    if torch.is_tensor(wav):
-        wav = wav.cpu().numpy()
+    # Determine voice to use
+    voice_name = None
 
-    # Ensure correct shape (channels, samples) -> (samples, channels) or (samples,)
-    if wav.ndim > 1 and wav.shape[0] < wav.shape[1]:
-        wav = wav.T
+    if audio_prompt and Path(audio_prompt).exists():
+        # Upload voice with language and get voice_name
+        voice_name = upload_voice(audio_prompt, language_id)
+        if voice_name:
+            rprint(f"[cyan]Using voice cloning: {voice_name}[/cyan]")
 
-    # Save as WAV
-    sf.write(str(save_path), wav, sample_rate)
+    if voice_name:
+        # Use uploaded voice (language inherited from voice metadata)
+        payload = {
+            'input': text,
+            'voice': voice_name,
+            'exaggeration': exaggeration,
+            'cfg_weight': cfg_weight
+        }
+
+        response = requests.post(
+            f"{api_url}/v1/audio/speech",
+            json=payload,
+            timeout=120
+        )
+    else:
+        # Use with voice file directly (single request with file upload)
+        if audio_prompt and Path(audio_prompt).exists():
+            rprint(f"[cyan]Using voice cloning with direct upload (language: {language_id})[/cyan]")
+            with open(audio_prompt, 'rb') as f:
+                files = {'voice_file': (Path(audio_prompt).name, f, 'audio/wav')}
+                data = {
+                    'input': text,
+                    'language': language_id,
+                    'exaggeration': str(exaggeration),
+                    'cfg_weight': str(cfg_weight)
+                }
+                response = requests.post(
+                    f"{api_url}/v1/audio/speech/upload",
+                    files=files,
+                    data=data,
+                    timeout=120
+                )
+        else:
+            # Basic TTS without voice cloning
+            rprint(f"[cyan]Generating audio (language: {language_id}, no voice cloning)[/cyan]")
+            payload = {
+                'input': text,
+                'language': language_id,
+                'exaggeration': exaggeration
+            }
+            response = requests.post(
+                f"{api_url}/v1/audio/speech",
+                json=payload,
+                timeout=120
+            )
+
+    if response.status_code != 200:
+        raise Exception(f"TTS API error ({response.status_code}): {response.text}")
+
+    # Save audio file
+    with open(save_path, 'wb') as f:
+        f.write(response.content)
+
     rprint(f"[bold green]✓ Audio saved: {save_path}[/bold green]")
-
     return True
+
 
 def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
     """
@@ -345,7 +410,6 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
     VOICE_CLONE_MODE = chatterbox_config.get("voice_clone_mode", 1)
     EXAGGERATION = chatterbox_config.get("exaggeration", 0.5)
     CFG_WEIGHT = chatterbox_config.get("cfg_weight", 0.4)
-    DEVICE = chatterbox_config.get("device", "cuda")
 
     # Get target language
     TARGET_LANGUAGE = load_key("target_language")
@@ -398,8 +462,7 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
             language_id=language_id,
             audio_prompt=audio_prompt,
             exaggeration=EXAGGERATION,
-            cfg_weight=CFG_WEIGHT,
-            device=DEVICE
+            cfg_weight=CFG_WEIGHT
         )
         return success
     except Exception as e:

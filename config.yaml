@@ -119,20 +119,17 @@ gpt_sovits:
 f5tts:
   302_api: 'YOUR_302_API_KEY'
 
-# Chatterbox TTS configuration (Open-source, 23 languages, zero-shot voice cloning)
-# Install: pip install chatterbox-tts
+# Chatterbox TTS configuration (Open-source, 22 languages, zero-shot voice cloning)
+# API: https://github.com/travisvn/chatterbox-tts-api
 chatterbox_tts:
+  # Chatterbox API URL (Docker: docker compose -f docker/docker-compose.gpu.yml up -d)
+  api_url: 'http://localhost:4123'
   # Voice cloning mode: 1 = No cloning, 2 = Single reference for all, 3 = Per-segment reference
   voice_clone_mode: 2
-  # Control emotionality (0.0-1.0, recommended 0.5)
+  # Control emotionality (0.25-2.0, recommended 0.5)
   exaggeration: 0.5
-  # Influence of reference audio for voice cloning (0.3-0.5 optimal)
+  # Influence of reference audio for voice cloning (0.0-1.0, optimal 0.3-0.5)
   cfg_weight: 0.4
-  # Device to use: 'cuda' for GPU, 'cpu' for CPU
-  device: 'cuda'
-  # Number of models in pool for parallel generation (~3.25GB VRAM each)
-  # Set to 1 for single-threaded mode, 4 recommended for RTX 3090 (24GB)
-  pool_size: 4
 
 # *Audio speed range
 speed_factor:
