@@ -191,17 +191,17 @@ def upload_voice(voice_path: str, language_id: str) -> str:
     """
     global _uploaded_voices
 
-    # Check cache first
-    cache_key = f"{voice_path}:{language_id}"
-    if cache_key in _uploaded_voices:
-        return _uploaded_voices[cache_key]
-
     api_url = get_api_url()
 
     # Generate unique voice name based on full file hash
     with open(voice_path, 'rb') as f:
         file_hash = hashlib.md5(f.read()).hexdigest()[:12]
     voice_name = f"vl_{language_id}_{file_hash}"
+
+    # Check cache (includes hash so changed files get re-uploaded)
+    cache_key = f"{voice_path}:{language_id}:{file_hash}"
+    if cache_key in _uploaded_voices:
+        return _uploaded_voices[cache_key]
 
     # Check if voice already exists
     try:
