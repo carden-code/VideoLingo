@@ -347,11 +347,12 @@ def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exagger
     else:
         # Use with voice file directly (single request with file upload)
         if audio_prompt and Path(audio_prompt).exists():
-            rprint(f"[cyan]Using voice cloning with direct upload[/cyan]")
+            rprint(f"[cyan]Using voice cloning with direct upload (language: {language_id})[/cyan]")
             with open(audio_prompt, 'rb') as f:
                 files = {'voice_file': (Path(audio_prompt).name, f, 'audio/wav')}
                 data = {
                     'input': text,
+                    'language': language_id,
                     'exaggeration': str(exaggeration),
                     'cfg_weight': str(cfg_weight)
                 }
@@ -363,9 +364,10 @@ def chatterbox_tts(text, save_path, language_id='en', audio_prompt=None, exagger
                 )
         else:
             # Basic TTS without voice cloning
-            rprint(f"[cyan]Generating audio (no voice cloning)[/cyan]")
+            rprint(f"[cyan]Generating audio (language: {language_id}, no voice cloning)[/cyan]")
             payload = {
                 'input': text,
+                'language': language_id,
                 'exaggeration': exaggeration
             }
             response = requests.post(
