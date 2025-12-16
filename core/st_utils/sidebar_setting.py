@@ -153,16 +153,15 @@ def page_setting():
             config_input("302ai API", "f5tts.302_api")
 
         elif select_tts == "chatterbox_tts":
-            st.info("📦 Install: `pip install chatterbox-tts soundfile`")
+            st.info("🐳 Requires Chatterbox TTS API running in Docker")
 
             # Ensure chatterbox_tts config section exists with defaults
             from core.utils.config_utils import ensure_section
             ensure_section('chatterbox_tts', {
+                'api_url': 'http://localhost:4123',
                 'voice_clone_mode': 2,
                 'exaggeration': 0.5,
-                'cfg_weight': 0.4,
-                'device': 'cuda',
-                'pool_size': 4
+                'cfg_weight': 0.4
             })
 
             # Helper function to safely load config
@@ -220,31 +219,15 @@ def page_setting():
                     update_key("chatterbox_tts.cfg_weight", cfg_weight)
                     st.rerun()
 
-            # Device selection
-            device_options = ["cuda", "cpu"]
-            current_device = load_chatterbox_config("device", "cuda")
-            selected_device = st.selectbox(
-                "Device",
-                options=device_options,
-                index=device_options.index(current_device),
-                help="Use CUDA for GPU acceleration (faster) or CPU"
+            # API URL
+            current_api_url = load_chatterbox_config("api_url", "http://localhost:4123")
+            api_url = st.text_input(
+                "Chatterbox API URL",
+                value=current_api_url,
+                help="URL of Chatterbox TTS API (Docker: docker compose -f docker/docker-compose.gpu.yml up -d)"
             )
-            if selected_device != current_device:
-                update_key("chatterbox_tts.device", selected_device)
-                st.rerun()
-
-            # Pool size for parallel generation
-            current_pool_size = load_chatterbox_config("pool_size", 4)
-            pool_size = st.number_input(
-                "Model Pool Size",
-                min_value=1,
-                max_value=8,
-                value=int(current_pool_size),
-                step=1,
-                help="Number of models for parallel TTS (~3.25GB VRAM each). 4 recommended for RTX 3090 (24GB), 1 for single-threaded mode"
-            )
-            if pool_size != current_pool_size:
-                update_key("chatterbox_tts.pool_size", pool_size)
+            if api_url != current_api_url:
+                update_key("chatterbox_tts.api_url", api_url)
                 st.rerun()
 
 def check_api():
