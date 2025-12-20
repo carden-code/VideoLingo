@@ -243,16 +243,7 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     # Get configuration
     MODE = config.get("mode", "cross_lingual")  # zero_shot or cross_lingual
 
-    # Get reference text from task_df (original language text)
-    reference_text = None
-    if MODE == "zero_shot":
-        try:
-            reference_text = task_df.loc[task_df['number'] == number, 'origin'].values[0]
-        except (KeyError, IndexError):
-            rprint(f"[yellow]Could not get reference text for segment {number}, using cross_lingual mode[/yellow]")
-            MODE = "cross_lingual"
-
-    # Find reference audio
+    # Find reference audio FIRST
     current_dir = Path.cwd()
     refers_dir = current_dir / "output/audio/refers"
 
@@ -271,14 +262,16 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     if not audio_prompt:
         raise Exception("No suitable reference audio found for CosyVoice")
 
-    # Get reference text for the selected audio segment if in zero_shot mode
-    if MODE == "zero_shot" and reference_text is None:
-        # Try to get text for the reference audio segment
+    # Get reference text for the SELECTED audio segment (must match audio!)
+    reference_text = None
+    if MODE == "zero_shot":
+        # Extract segment number from the selected audio file
         ref_number = int(Path(audio_prompt).stem) if Path(audio_prompt).stem.isdigit() else 1
         try:
             reference_text = task_df.loc[task_df['number'] == ref_number, 'origin'].values[0]
+            rprint(f"[cyan]Zero-shot mode: using reference segment {ref_number}[/cyan]")
         except (KeyError, IndexError):
-            rprint(f"[yellow]Could not get reference text, switching to cross_lingual mode[/yellow]")
+            rprint(f"[yellow]Could not get reference text for segment {ref_number}, switching to cross_lingual mode[/yellow]")
             MODE = "cross_lingual"
 
     # Generate TTS with fallback to edge_tts
