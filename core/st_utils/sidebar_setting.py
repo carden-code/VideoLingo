@@ -84,7 +84,7 @@ def page_setting():
             update_key("burn_subtitles", burn_subtitles)
             st.rerun()
     with st.expander(t("Dubbing Settings"), expanded=True):
-        tts_methods = ["azure_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts", "chatterbox_tts"]
+        tts_methods = ["azure_tts", "openai_tts", "fish_tts", "sf_fish_tts", "edge_tts", "gpt_sovits", "custom_tts", "sf_cosyvoice2", "f5tts", "chatterbox_tts", "cosyvoice3"]
         select_tts = st.selectbox(t("TTS Method"), options=tts_methods, index=tts_methods.index(load_key("tts_method")))
         if select_tts != load_key("tts_method"):
             update_key("tts_method", select_tts)
@@ -229,6 +229,67 @@ def page_setting():
             if api_url != current_api_url:
                 update_key("chatterbox_tts.api_url", api_url)
                 st.rerun()
+
+        elif select_tts == "cosyvoice3":
+            st.info("🎙️ CosyVoice 3.0 - Multilingual TTS with voice cloning (ZH, EN, JA, KO, DE, ES, FR, IT, RU)")
+
+            # Ensure cosyvoice3 config section exists with defaults
+            from core.utils.config_utils import ensure_section
+            ensure_section('cosyvoice3', {
+                'api_url': 'http://localhost:50000',
+                'mode': 'cross_lingual',
+                'sample_rate': 22050
+            })
+
+            # Helper function to safely load config
+            def load_cosyvoice3_config(key, default):
+                try:
+                    return load_key(f"cosyvoice3.{key}")
+                except KeyError:
+                    return default
+
+            # Mode selection
+            mode_options = {
+                "cross_lingual": "Cross-lingual (voice cloning without reference text)",
+                "zero_shot": "Zero-shot (voice cloning with reference text, better quality)"
+            }
+            current_mode = load_cosyvoice3_config("mode", "cross_lingual")
+            selected_mode = st.selectbox(
+                "Voice Clone Mode",
+                options=list(mode_options.keys()),
+                format_func=lambda x: mode_options[x],
+                index=list(mode_options.keys()).index(current_mode) if current_mode in mode_options else 0,
+                help="cross_lingual: Works across languages. zero_shot: Better quality but requires reference text"
+            )
+            if selected_mode != current_mode:
+                update_key("cosyvoice3.mode", selected_mode)
+                st.rerun()
+
+            # API URL
+            current_api_url = load_cosyvoice3_config("api_url", "http://localhost:50000")
+            api_url = st.text_input(
+                "CosyVoice API URL",
+                value=current_api_url,
+                help="URL of CosyVoice 3.0 FastAPI server (default port: 50000)"
+            )
+            if api_url != current_api_url:
+                update_key("cosyvoice3.api_url", api_url)
+                st.rerun()
+
+            # Sample rate (advanced)
+            with st.expander("Advanced Settings"):
+                current_sample_rate = load_cosyvoice3_config("sample_rate", 22050)
+                sample_rate = st.number_input(
+                    "Sample Rate (Hz)",
+                    min_value=16000,
+                    max_value=48000,
+                    value=int(current_sample_rate),
+                    step=1000,
+                    help="Audio sample rate. Default: 22050 Hz for CosyVoice"
+                )
+                if sample_rate != current_sample_rate:
+                    update_key("cosyvoice3.sample_rate", sample_rate)
+                    st.rerun()
 
 def check_api():
     try:
