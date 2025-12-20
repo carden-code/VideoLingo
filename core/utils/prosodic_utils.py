@@ -13,7 +13,7 @@ Based on research:
 
 import pandas as pd
 import numpy as np
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from rich import print as rprint
 
@@ -52,7 +52,7 @@ def load_word_timestamps(chunks_file: str = "output/log/cleaned_chunks.xlsx") ->
 
 def calculate_pauses(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate pause duration after each word.
+    Calculate pause duration after each word with basic validation.
 
     Args:
         df: DataFrame with 'start' and 'end' columns
@@ -61,15 +61,100 @@ def calculate_pauses(df: pd.DataFrame) -> pd.DataFrame:
         DataFrame with added 'pause_after' column
     """
     df = df.copy()
+    df['start'] = pd.to_numeric(df['start'], errors='coerce')
+    df['end'] = pd.to_numeric(df['end'], errors='coerce')
     df['pause_after'] = 0.0
 
     for i in range(len(df) - 1):
+        current_start = df.iloc[i]['start']
         current_end = df.iloc[i]['end']
         next_start = df.iloc[i + 1]['start']
-        pause = max(0, next_start - current_end)
-        df.iloc[i, df.columns.get_loc('pause_after')] = pause
+
+        if not (np.isfinite(current_start) and np.isfinite(current_end) and np.isfinite(next_start)):
+            continue
+
+        if current_end <= current_start:
+            continue
+
+        pause = next_start - current_end
+        if pause < 0:
+            pause = 0.0
+        df.loc[df.index[i], 'pause_after'] = pause
 
     return df
+
+
+def health_check_timestamps(df: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Health check for word timestamps quality.
+
+    Checks:
+    - % of zero-duration words (alignment failures)
+    - Monotonicity (timestamps should increase)
+    - Invalid timestamps (NaN/inf)
+
+    Args:
+        df: DataFrame with word timestamps
+
+    Returns:
+        Dictionary with health metrics
+    """
+    total_words = len(df)
+    if total_words == 0:
+        return {
+            'valid': False,
+            'reason': 'empty dataframe',
+            'usable_for_prosody': False
+        }
+
+    df = df.copy()
+    df['start'] = pd.to_numeric(df['start'], errors='coerce')
+    df['end'] = pd.to_numeric(df['end'], errors='coerce')
+
+    valid_mask = np.isfinite(df['start']) & np.isfinite(df['end'])
+    invalid_count = int((~valid_mask).sum())
+    invalid_pct = invalid_count / total_words * 100
+
+    durations = df['end'] - df['start']
+    zero_duration = int(((durations <= 0) & valid_mask).sum())
+    zero_pct = zero_duration / total_words * 100
+
+    non_monotonic = 0
+    pairs = 0
+    for i in range(len(df) - 1):
+        current_end = df.iloc[i]['end']
+        next_start = df.iloc[i + 1]['start']
+        if not (np.isfinite(current_end) and np.isfinite(next_start)):
+            continue
+        pairs += 1
+        if next_start < current_end:
+            non_monotonic += 1
+
+    non_mono_pct = (non_monotonic / pairs * 100) if pairs else 0.0
+
+    if 'pause_after' in df.columns:
+        pauses = pd.to_numeric(df['pause_after'], errors='coerce')
+        valid_pauses = pauses[np.isfinite(pauses)]
+        zero_pause_pct = (valid_pauses == 0).sum() / len(valid_pauses) * 100 if len(valid_pauses) else 0.0
+    else:
+        zero_pause_pct = 0.0
+
+    is_good = zero_pct < 5 and non_mono_pct < 5 and invalid_pct < 1
+    usable_for_prosody = zero_pct < 20 and non_mono_pct < 20 and invalid_pct < 5
+
+    return {
+        'valid': True,
+        'total_words': total_words,
+        'invalid_timestamps': invalid_count,
+        'invalid_pct': round(invalid_pct, 1),
+        'zero_duration_words': zero_duration,
+        'zero_duration_pct': round(zero_pct, 1),
+        'non_monotonic': non_monotonic,
+        'non_monotonic_pct': round(non_mono_pct, 1),
+        'zero_pause_pct': round(zero_pause_pct, 1),
+        'quality': 'good' if is_good else 'degraded',
+        'usable_for_prosody': usable_for_prosody
+    }
 
 
 def detect_prosodic_boundaries(df: pd.DataFrame,
@@ -378,7 +463,7 @@ def get_pause_statistics(df: pd.DataFrame) -> Dict[str, float]:
     Calculate pause statistics for the audio.
 
     Args:
-        df: DataFrame with word timestamps
+        df: DataFrame with word timestamps (must have 'pause_after' column)
 
     Returns:
         Dictionary with pause statistics
@@ -387,6 +472,7 @@ def get_pause_statistics(df: pd.DataFrame) -> Dict[str, float]:
         df = calculate_pauses(df)
 
     pauses = df['pause_after'].values
+    pauses = pauses[np.isfinite(pauses)]
     pauses = pauses[pauses > 0]  # Only non-zero pauses
 
     if len(pauses) == 0:

@@ -12,7 +12,7 @@ from core.utils.prosodic_utils import (
     load_word_timestamps,
     calculate_pauses,
     get_pause_statistics,
-    get_pause_at_position,
+    health_check_timestamps,
     PAUSE_THRESHOLD_PHRASE,
     PAUSE_THRESHOLD_SENTENCE
 )
@@ -49,13 +49,36 @@ def load_prosody_data():
         return None
 
     try:
-        PROSODY_DF = load_word_timestamps(chunks_file)
-        PROSODY_DF = calculate_pauses(PROSODY_DF)
+        prosody_df = load_word_timestamps(chunks_file)
+        prosody_df = calculate_pauses(prosody_df)
+
+        health = health_check_timestamps(prosody_df)
+        if not health.get('valid', True):
+            rprint(f"[yellow]⚠️ Prosody: {health.get('reason', 'invalid timestamps')}[/yellow]")
+            return None
+
+        if not health.get('usable_for_prosody', False):
+            rprint(
+                f"[yellow]⚠️ Prosody: timestamps quality too low "
+                f"({health.get('zero_duration_pct', 0)}% zero-duration, "
+                f"{health.get('non_monotonic_pct', 0)}% non-monotonic, "
+                f"{health.get('invalid_pct', 0)}% invalid), skipping[/yellow]"
+            )
+            return None
+
+        PROSODY_DF = prosody_df
 
         # Print prosody statistics
         stats = get_pause_statistics(PROSODY_DF)
-        rprint(f"[cyan]🎵 Prosody analysis: {stats['phrase_boundaries']} phrase boundaries, "
-               f"{stats['sentence_boundaries']} sentence boundaries detected[/cyan]")
+        rprint(f"[cyan]🎵 Prosody: {stats['phrase_boundaries']} phrase / {stats['sentence_boundaries']} sentence boundaries[/cyan]")
+
+        # Show health info if degraded
+        if health['quality'] == 'degraded':
+            rprint(
+                f"[yellow]⚠️ Timestamps: {health['zero_duration_pct']}% zero-duration, "
+                f"{health['non_monotonic_pct']}% non-monotonic, "
+                f"{health['invalid_pct']}% invalid[/yellow]"
+            )
 
         return PROSODY_DF
     except Exception as e:
