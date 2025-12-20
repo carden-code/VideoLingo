@@ -275,7 +275,9 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     reference_text = None
     if MODE == "zero_shot":
         # Extract segment number from the selected audio file
-        ref_number = int(Path(audio_prompt).stem) if Path(audio_prompt).stem.isdigit() else 1
+        # Strip _enhanced suffix if present (e.g., "2_enhanced" -> "2")
+        ref_stem = Path(audio_prompt).stem.replace("_enhanced", "")
+        ref_number = int(ref_stem) if ref_stem.isdigit() else 1
         try:
             reference_text = task_df.loc[task_df['number'] == ref_number, 'origin'].values[0]
             rprint(f"[cyan]Zero-shot mode: using reference segment {ref_number}[/cyan]")
