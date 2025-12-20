@@ -267,6 +267,7 @@ def find_optimal_reference(min_duration: float = 10.0, max_duration: float = 30.
             refers_dir=str(Path.cwd() / "output/audio/refers"),
             min_duration=min_duration,
             max_duration=max_duration,
+            fallback_min=fallback_min,
             enhance=enhance
         )
     except ImportError:

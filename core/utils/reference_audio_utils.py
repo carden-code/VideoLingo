@@ -303,6 +303,7 @@ def get_best_enhanced_reference(
     refers_dir: str = "output/audio/refers",
     min_duration: float = DEFAULT_MIN_DURATION,
     max_duration: float = DEFAULT_MAX_DURATION,
+    fallback_min: float = DEFAULT_FALLBACK_MIN,
     enhance: bool = True,
     noise_reduce_strength: float = 0.3
 ) -> Optional[str]:
@@ -315,6 +316,7 @@ def get_best_enhanced_reference(
         refers_dir: Directory containing reference audio segments
         min_duration: Minimum ideal duration (default 10s)
         max_duration: Maximum ideal duration (default 30s)
+        fallback_min: Minimum acceptable duration if no ideal found (default 5s)
         enhance: Whether to apply noise reduction/normalization
         noise_reduce_strength: Strength of noise reduction
 
@@ -325,7 +327,8 @@ def get_best_enhanced_reference(
     best_ref = find_best_reference(
         refers_dir=refers_dir,
         min_duration=min_duration,
-        max_duration=max_duration
+        max_duration=max_duration,
+        fallback_min=fallback_min
     )
 
     if best_ref is None:
