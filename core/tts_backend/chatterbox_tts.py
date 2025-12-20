@@ -283,14 +283,25 @@ def find_optimal_reference(min_duration: float = 10.0, max_duration: float = 30.
 
         ref_files.sort(key=lambda x: int(x.stem) if x.stem.isdigit() else 999)
 
+        # First pass: find optimal duration (10-30s)
+        candidates = []
         for ref_file in ref_files:
             try:
                 duration = get_audio_duration(str(ref_file))
-                if min_duration <= duration <= max_duration:
-                    rprint(f"[green]✓ Found reference: {ref_file.name} ({duration:.1f}s)[/green]")
-                    return str(ref_file)
+                if duration >= fallback_min:
+                    candidates.append((ref_file, duration))
+                    if min_duration <= duration <= max_duration:
+                        rprint(f"[green]✓ Found optimal reference: {ref_file.name} ({duration:.1f}s)[/green]")
+                        return str(ref_file)
             except Exception:
                 continue
+
+        # Fallback: use longest available clip >= fallback_min
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            best = candidates[0]
+            rprint(f"[yellow]Using best available: {best[0].name} ({best[1]:.1f}s)[/yellow]")
+            return str(best[0])
 
         return None
 
