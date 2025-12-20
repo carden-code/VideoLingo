@@ -33,3 +33,4 @@ g2p-en
 xmltodict
 noisereduce
 soundfile
+pyrubberband

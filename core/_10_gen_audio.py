@@ -15,6 +15,7 @@ from core.utils import *
 from core.utils.models import *
 from core.asr_backend.audio_preprocess import get_audio_duration
 from core.tts_backend.tts_main import tts_main
+from core.utils.time_stretch import adjust_audio_speed, get_stretch_backend
 
 console = Console()
 
@@ -65,41 +66,6 @@ def parse_df_srt_time(time_str: str) -> float:
     hours, minutes, seconds = time_str.strip().split(':')
     seconds, milliseconds = seconds.split('.')
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
-
-def adjust_audio_speed(input_file: str, output_file: str, speed_factor: float) -> None:
-    """Adjust audio speed and handle edge cases"""
-    # If the speed factor is close to 1, directly copy the file
-    if abs(speed_factor - 1.0) < 0.001:
-        shutil.copy2(input_file, output_file)
-        return
-        
-    atempo = speed_factor
-    cmd = ['ffmpeg', '-i', input_file, '-filter:a', f'atempo={atempo}', '-y', output_file]
-    input_duration = get_audio_duration(input_file)
-    max_retries = 2
-    for attempt in range(max_retries):
-        try:
-            subprocess.run(cmd, check=True, stderr=subprocess.PIPE)
-            output_duration = get_audio_duration(output_file)
-            expected_duration = input_duration / speed_factor
-            diff = output_duration - expected_duration
-            # If the output duration exceeds the expected duration, but the input audio is less than 3 seconds, and the error is within 0.1 seconds, truncate to the expected length
-            if output_duration >= expected_duration * 1.02 and input_duration < 3 and diff <= 0.1:
-                audio = AudioSegment.from_wav(output_file)
-                trimmed_audio = audio[:(expected_duration * 1000)]  # pydub uses milliseconds
-                trimmed_audio.export(output_file, format="wav")
-                print(f"✂️ Trimmed to expected duration: {expected_duration:.2f} seconds")
-                return
-            elif output_duration >= expected_duration * 1.02:
-                raise Exception(f"Audio duration abnormal: input file={input_file}, output file={output_file}, speed factor={speed_factor}, input duration={input_duration:.2f}s, output duration={output_duration:.2f}s")
-            return
-        except subprocess.CalledProcessError as e:
-            if attempt < max_retries - 1:
-                rprint(f"[yellow]⚠️ Audio speed adjustment failed, retrying in 1s ({attempt + 1}/{max_retries})[/yellow]")
-                time.sleep(1)
-            else:
-                rprint(f"[red]❌ Audio speed adjustment failed, max retries reached ({max_retries})[/red]")
-                raise e
 
 def process_row(row: pd.Series, tasks_df: pd.DataFrame) -> Tuple[int, float]:
     """Helper function for processing single row data"""
@@ -249,6 +215,13 @@ def merge_chunks(tasks_df: pd.DataFrame) -> pd.DataFrame:
 def gen_audio() -> None:
     """Main function: Generate audio and process timeline"""
     rprint("[bold magenta]🚀 Starting audio generation process...[/bold magenta]")
+
+    # Show time-stretch backend
+    backend = get_stretch_backend()
+    if backend == "rubberband":
+        rprint("[green]🎚️ Time-stretch: rubberband (high quality)[/green]")
+    else:
+        rprint("[yellow]🎚️ Time-stretch: ffmpeg atempo (install pyrubberband for better quality)[/yellow]")
 
     # 🧹 Step0: Free VRAM from Ollama before loading TTS models
     free_vram_for_tts()
