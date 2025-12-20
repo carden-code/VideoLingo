@@ -1,5 +1,6 @@
 import datetime
 import re
+import os
 import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
@@ -7,6 +8,14 @@ from core.prompts import get_subtitle_trim_prompt
 from core.tts_backend.estimate_duration import init_estimator, estimate_duration
 from core.utils import *
 from core.utils.models import *
+from core.utils.prosodic_utils import (
+    load_word_timestamps,
+    calculate_pauses,
+    get_pause_statistics,
+    get_pause_at_position,
+    PAUSE_THRESHOLD_PHRASE,
+    PAUSE_THRESHOLD_SENTENCE
+)
 
 console = Console()
 speed_factor = load_key("speed_factor")
@@ -14,11 +23,102 @@ speed_factor = load_key("speed_factor")
 TRANS_SUBS_FOR_AUDIO_FILE = 'output/audio/trans_subs_for_audio.srt'
 SRC_SUBS_FOR_AUDIO_FILE = 'output/audio/src_subs_for_audio.srt'
 ESTIMATOR = None
+PROSODY_DF = None  # Cached prosodic data
 
 # Minimum words for TTS - short texts cause Chatterbox issues (token repetition, empty alignment)
 MIN_WORDS_FOR_TTS = 3
 # Maximum gap (seconds) to consider merging with neighbor
 MAX_MERGE_GAP = 3.0
+
+
+def load_prosody_data():
+    """
+    Load and cache prosodic data from word timestamps.
+
+    Returns:
+        DataFrame with word timestamps and pauses, or None if not available
+    """
+    global PROSODY_DF
+
+    if PROSODY_DF is not None:
+        return PROSODY_DF
+
+    chunks_file = "output/log/cleaned_chunks.xlsx"
+    if not os.path.exists(chunks_file):
+        rprint("[dim]Prosody: word timestamps not available[/dim]")
+        return None
+
+    try:
+        PROSODY_DF = load_word_timestamps(chunks_file)
+        PROSODY_DF = calculate_pauses(PROSODY_DF)
+
+        # Print prosody statistics
+        stats = get_pause_statistics(PROSODY_DF)
+        rprint(f"[cyan]🎵 Prosody analysis: {stats['phrase_boundaries']} phrase boundaries, "
+               f"{stats['sentence_boundaries']} sentence boundaries detected[/cyan]")
+
+        return PROSODY_DF
+    except Exception as e:
+        rprint(f"[yellow]⚠️ Could not load prosody data: {e}[/yellow]")
+        return None
+
+
+def find_prosodic_pause_at_time(target_time: float, tolerance: float = 0.5) -> float:
+    """
+    Find the prosodic pause near a specific timestamp.
+
+    Args:
+        target_time: Time in seconds to search near
+        tolerance: Search window in seconds
+
+    Returns:
+        Pause duration if found, 0.0 otherwise
+    """
+    prosody_df = load_prosody_data()
+    if prosody_df is None:
+        return 0.0
+
+    # Find words near the target time
+    mask = (prosody_df['end'] >= target_time - tolerance) & \
+           (prosody_df['end'] <= target_time + tolerance)
+
+    nearby_words = prosody_df[mask]
+
+    if nearby_words.empty:
+        return 0.0
+
+    # Return the maximum pause in the window
+    return nearby_words['pause_after'].max()
+
+
+def is_prosodic_boundary(start_time: float, end_time: float) -> bool:
+    """
+    Check if there's a prosodic boundary (long pause) between two timestamps.
+
+    Args:
+        start_time: End time of first segment
+        end_time: Start time of second segment
+
+    Returns:
+        True if there's a significant prosodic pause
+    """
+    prosody_df = load_prosody_data()
+    if prosody_df is None:
+        return False
+
+    # Find words that end around start_time
+    mask = (prosody_df['end'] >= start_time - 0.2) & \
+           (prosody_df['end'] <= start_time + 0.2)
+
+    nearby_words = prosody_df[mask]
+
+    if nearby_words.empty:
+        return False
+
+    # Check if any word has a significant pause after it
+    max_pause = nearby_words['pause_after'].max()
+    return max_pause >= PAUSE_THRESHOLD_SENTENCE
+
 
 def check_len_then_trim(text, duration):
     global ESTIMATOR
@@ -83,7 +183,9 @@ def should_merge_with_neighbor(df, i, today, min_words=MIN_WORDS_FOR_TTS, max_ga
     """
     Decide which neighbor to merge with for short text segments.
 
-    Priority: NEXT segment (short replies usually relate to following phrase in speech)
+    Uses prosodic analysis to make smarter decisions:
+    - If there's a long pause (prosodic boundary), prefer NOT to merge
+    - Priority: NEXT segment (short replies usually relate to following phrase in speech)
 
     Args:
         df: DataFrame with subtitles
@@ -104,21 +206,43 @@ def should_merge_with_neighbor(df, i, today, min_words=MIN_WORDS_FOR_TTS, max_ga
     # Calculate gaps to neighbors
     gap_to_prev = float('inf')
     gap_to_next = float('inf')
+    prosody_pause_prev = 0.0
+    prosody_pause_next = 0.0
 
     if i > 0:
         prev_end = df.loc[i - 1, 'end_time']
         curr_start = df.loc[i, 'start_time']
         gap_to_prev = time_diff_seconds(prev_end, curr_start, today)
+        # Get prosodic pause at the boundary
+        prev_end_seconds = time_diff_seconds(datetime.time(0, 0, 0), prev_end, today)
+        prosody_pause_prev = find_prosodic_pause_at_time(prev_end_seconds)
 
     if i < len(df) - 1:
         curr_end = df.loc[i, 'end_time']
         next_start = df.loc[i + 1, 'start_time']
         gap_to_next = time_diff_seconds(curr_end, next_start, today)
+        # Get prosodic pause at the boundary
+        curr_end_seconds = time_diff_seconds(datetime.time(0, 0, 0), curr_end, today)
+        prosody_pause_next = find_prosodic_pause_at_time(curr_end_seconds)
 
-    # Priority: next segment (speech context usually flows forward)
-    if gap_to_next <= max_gap:
+    # Prosody-aware decision:
+    # If one direction has a strong prosodic boundary (long pause), prefer the other
+    next_has_boundary = prosody_pause_next >= PAUSE_THRESHOLD_SENTENCE
+    prev_has_boundary = prosody_pause_prev >= PAUSE_THRESHOLD_SENTENCE
+
+    # If merging with NEXT would cross a sentence boundary, try PREV
+    if gap_to_next <= max_gap and not next_has_boundary:
+        return 'next'
+    elif gap_to_prev <= max_gap and not prev_has_boundary:
+        return 'prev'
+    # Fallback: even if there's a boundary, merge if we must (short text is worse)
+    elif gap_to_next <= max_gap:
+        if next_has_boundary:
+            rprint(f"[dim]Prosody: crossing sentence boundary to merge '{text}'[/dim]")
         return 'next'
     elif gap_to_prev <= max_gap:
+        if prev_has_boundary:
+            rprint(f"[dim]Prosody: crossing sentence boundary to merge '{text}'[/dim]")
         return 'prev'
 
     return None  # Both neighbors too far - will rely on monkey-patch fallback
@@ -191,10 +315,14 @@ def merge_short_text_segments(df):
 
 def process_srt():
     """Process srt file, generate audio tasks"""
-    
+
+    # Load prosodic data early for analysis
+    rprint("[bold cyan]🎵 Loading prosodic data from word timestamps...[/bold cyan]")
+    load_prosody_data()
+
     with open(TRANS_SUBS_FOR_AUDIO_FILE, 'r', encoding='utf-8') as file:
         content = file.read()
-    
+
     with open(SRC_SUBS_FOR_AUDIO_FILE, 'r', encoding='utf-8') as src_file:
         src_content = src_file.read()
     
@@ -243,23 +371,41 @@ def process_srt():
     rprint("[bold cyan]📝 Checking for short text segments to merge...[/bold cyan]")
     df = merge_short_text_segments(df)
 
-    # 🔄 Second pass: Merge short DURATION segments (existing logic)
+    # 🔄 Second pass: Merge short DURATION segments (with prosody-aware logic)
     i = 0
     MIN_SUB_DUR = load_key("min_subtitle_duration")
     while i < len(df):
         today = datetime.date.today()
         if df.loc[i, 'duration'] < MIN_SUB_DUR:
-            if i < len(df) - 1 and time_diff_seconds(df.loc[i, 'start_time'],df.loc[i+1, 'start_time'],today) < MIN_SUB_DUR:
-                rprint(f"[bold yellow]Merging subtitles {i+1} and {i+2}[/bold yellow]")
-                df.loc[i, 'text'] += ' ' + df.loc[i+1, 'text']
-                df.loc[i, 'origin'] += ' ' + df.loc[i+1, 'origin']
-                df.loc[i, 'end_time'] = df.loc[i+1, 'end_time']
-                df.loc[i, 'duration'] = time_diff_seconds(df.loc[i, 'start_time'],df.loc[i, 'end_time'],today)
-                df = df.drop(i+1).reset_index(drop=True)
+            # Check if we can merge with next segment
+            can_merge_next = i < len(df) - 1 and \
+                             time_diff_seconds(df.loc[i, 'start_time'], df.loc[i+1, 'start_time'], today) < MIN_SUB_DUR
+
+            if can_merge_next:
+                # VAD-guided: Check for prosodic boundary before merging
+                curr_end = df.loc[i, 'end_time']
+                curr_end_seconds = time_diff_seconds(datetime.time(0, 0, 0), curr_end, today)
+                prosody_pause = find_prosodic_pause_at_time(curr_end_seconds)
+
+                if prosody_pause >= PAUSE_THRESHOLD_SENTENCE:
+                    # Strong prosodic boundary - prefer extending over merging
+                    rprint(f"[dim]VAD: pause {prosody_pause*1000:.0f}ms detected, extending instead of merging[/dim]")
+                    df.loc[i, 'end_time'] = (datetime.datetime.combine(today, df.loc[i, 'start_time']) +
+                                            datetime.timedelta(seconds=MIN_SUB_DUR)).time()
+                    df.loc[i, 'duration'] = MIN_SUB_DUR
+                    i += 1
+                else:
+                    # No strong boundary - safe to merge
+                    rprint(f"[bold yellow]Merging subtitles {i+1} and {i+2}[/bold yellow]")
+                    df.loc[i, 'text'] += ' ' + df.loc[i+1, 'text']
+                    df.loc[i, 'origin'] += ' ' + df.loc[i+1, 'origin']
+                    df.loc[i, 'end_time'] = df.loc[i+1, 'end_time']
+                    df.loc[i, 'duration'] = time_diff_seconds(df.loc[i, 'start_time'], df.loc[i, 'end_time'], today)
+                    df = df.drop(i+1).reset_index(drop=True)
             else:
                 if i < len(df) - 1:  # Not the last audio
                     rprint(f"[bold blue]Extending subtitle {i+1} duration to {MIN_SUB_DUR} seconds[/bold blue]")
-                    df.loc[i, 'end_time'] = (datetime.datetime.combine(today, df.loc[i, 'start_time']) + 
+                    df.loc[i, 'end_time'] = (datetime.datetime.combine(today, df.loc[i, 'start_time']) +
                                             datetime.timedelta(seconds=MIN_SUB_DUR)).time()
                     df.loc[i, 'duration'] = MIN_SUB_DUR
                 else:
