@@ -78,7 +78,36 @@ def page_setting():
         if demucs != load_key("demucs"):
             update_key("demucs", demucs)
             st.rerun()
-        
+
+        # Audio separator model selection (only shown when demucs is enabled)
+        if demucs:
+            from core.utils.config_utils import ensure_section
+            ensure_section('audio_separator', {'model': 'bs_roformer'})
+
+            separator_models = {
+                "bs_roformer": "BS-Roformer (Best quality, SDR ~12.9)",
+                "mel_band_roformer": "MelBand-Roformer (Complex mixes, SDR ~11.4)",
+                "htdemucs": "htdemucs (Fast baseline, SDR ~10-11)"
+            }
+
+            def load_separator_model():
+                try:
+                    return load_key("audio_separator.model")
+                except KeyError:
+                    return "bs_roformer"
+
+            current_model = load_separator_model()
+            selected_model = st.selectbox(
+                "Audio Separator Model",
+                options=list(separator_models.keys()),
+                format_func=lambda x: separator_models[x],
+                index=list(separator_models.keys()).index(current_model) if current_model in separator_models else 0,
+                help="BS-Roformer: Best quality for TTS cloning. htdemucs: Faster but lower quality."
+            )
+            if selected_model != current_model:
+                update_key("audio_separator.model", selected_model)
+                st.rerun()
+
         burn_subtitles = st.toggle(t("Burn-in Subtitles"), value=load_key("burn_subtitles"), help=t("Whether to burn subtitles into the video, will increase processing time"))
         if burn_subtitles != load_key("burn_subtitles"):
             update_key("burn_subtitles", burn_subtitles)
