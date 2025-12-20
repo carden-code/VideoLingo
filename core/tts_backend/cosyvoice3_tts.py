@@ -87,57 +87,53 @@ def get_language_code(language_name):
     return 'en'
 
 
-def find_optimal_reference(min_duration: float = 3.0, max_duration: float = 10.0) -> str:
+def find_optimal_reference(min_duration: float = 10.0, max_duration: float = 30.0, enhance: bool = True) -> str:
     """
     Find optimal reference audio for CosyVoice voice cloning.
 
-    CosyVoice works best with reference audio between 3-10 seconds.
+    Uses SNR analysis to select the cleanest audio segment.
+    CosyVoice works best with reference audio between 10-30 seconds.
 
     Args:
-        min_duration: Minimum duration (default 3.0s)
-        max_duration: Maximum duration (default 10.0s)
+        min_duration: Minimum duration (default 10.0s for better voice cloning)
+        max_duration: Maximum duration (default 30.0s)
+        enhance: Apply noise reduction and normalization
 
     Returns:
         Path to optimal reference audio, or None if none suitable found
     """
-    from core.asr_backend.audio_preprocess import get_audio_duration
+    try:
+        from core.utils.reference_audio_utils import get_best_enhanced_reference
+        return get_best_enhanced_reference(
+            refers_dir=str(Path.cwd() / "output/audio/refers"),
+            min_duration=min_duration,
+            max_duration=max_duration,
+            enhance=enhance
+        )
+    except ImportError:
+        # Fallback to simple selection if new module not available
+        from core.asr_backend.audio_preprocess import get_audio_duration
 
-    refers_dir = Path.cwd() / "output/audio/refers"
-    if not refers_dir.exists():
+        refers_dir = Path.cwd() / "output/audio/refers"
+        if not refers_dir.exists():
+            return None
+
+        ref_files = list(refers_dir.glob("*.wav"))
+        if not ref_files:
+            return None
+
+        ref_files.sort(key=lambda x: int(x.stem) if x.stem.isdigit() else 999)
+
+        for ref_file in ref_files:
+            try:
+                duration = get_audio_duration(str(ref_file))
+                if min_duration <= duration <= max_duration:
+                    rprint(f"[green]✓ Found reference: {ref_file.name} ({duration:.1f}s)[/green]")
+                    return str(ref_file)
+            except Exception:
+                continue
+
         return None
-
-    ref_files = list(refers_dir.glob("*.wav"))
-    if not ref_files:
-        return None
-
-    # Sort by segment number
-    ref_files.sort(key=lambda x: int(x.stem) if x.stem.isdigit() else 999)
-
-    best_ref = None
-    best_duration = 0
-
-    for ref_file in ref_files:
-        try:
-            duration = get_audio_duration(str(ref_file))
-        except Exception:
-            continue
-
-        # Ideal: 3-10 seconds
-        if min_duration <= duration <= max_duration:
-            rprint(f"[green]✓ Found optimal reference: {ref_file.name} ({duration:.1f}s)[/green]")
-            return str(ref_file)
-
-        # Track longest acceptable
-        if duration >= min_duration and duration > best_duration:
-            best_ref = str(ref_file)
-            best_duration = duration
-
-    if best_ref:
-        rprint(f"[yellow]Using best available reference: {Path(best_ref).name} ({best_duration:.1f}s)[/yellow]")
-    else:
-        rprint(f"[red]No reference audio >= {min_duration}s found[/red]")
-
-    return best_ref
 
 
 def save_pcm_to_wav(pcm_data: bytes, save_path: str, sample_rate: int = 22050):
