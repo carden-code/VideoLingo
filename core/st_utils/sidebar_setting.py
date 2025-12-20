@@ -276,20 +276,19 @@ def page_setting():
                 update_key("cosyvoice3.api_url", api_url)
                 st.rerun()
 
-            # Sample rate (advanced)
-            with st.expander("Advanced Settings"):
-                current_sample_rate = load_cosyvoice3_config("sample_rate", 22050)
-                sample_rate = st.number_input(
-                    "Sample Rate (Hz)",
-                    min_value=16000,
-                    max_value=48000,
-                    value=int(current_sample_rate),
-                    step=1000,
-                    help="Audio sample rate. Default: 22050 Hz for CosyVoice"
-                )
-                if sample_rate != current_sample_rate:
-                    update_key("cosyvoice3.sample_rate", sample_rate)
-                    st.rerun()
+            # Sample rate
+            current_sample_rate = load_cosyvoice3_config("sample_rate", 22050)
+            sample_rate = st.number_input(
+                "Sample Rate (Hz)",
+                min_value=16000,
+                max_value=48000,
+                value=int(current_sample_rate),
+                step=1000,
+                help="Audio sample rate. Default: 22050 Hz for CosyVoice"
+            )
+            if sample_rate != current_sample_rate:
+                update_key("cosyvoice3.sample_rate", sample_rate)
+                st.rerun()
 
 def check_api():
     try:

@@ -90,20 +90,38 @@ def audio_processing_section():
                 st.rerun()
 
 def process_audio():
-    with st.spinner(t("Generate audio tasks")): 
-        _8_1_audio_task.gen_audio_task_main()
-        _8_2_dub_chunks.gen_dub_chunks()
-    with st.spinner(t("Extract refer audio")):
-        _9_refer_audio.extract_refer_audio_main()
-    with st.spinner(t("Generate all audio")):
-        _10_gen_audio.gen_audio()
-    with st.spinner(t("Merge full audio")):
-        _11_merge_audio.merge_full_audio()
-    with st.spinner(t("Merge dubbing to the video")):
-        _12_dub_to_vid.merge_video_audio()
-    
-    st.success(t("Audio processing complete! 🎇"))
-    st.balloons()
+    import traceback
+    try:
+        print("[DEBUG] Starting process_audio()")
+        with st.spinner(t("Generate audio tasks")):
+            print("[DEBUG] Step 1: gen_audio_task_main")
+            _8_1_audio_task.gen_audio_task_main()
+            print("[DEBUG] Step 2: gen_dub_chunks")
+            _8_2_dub_chunks.gen_dub_chunks()
+        with st.spinner(t("Extract refer audio")):
+            print("[DEBUG] Step 3: extract_refer_audio_main")
+            _9_refer_audio.extract_refer_audio_main()
+        with st.spinner(t("Generate all audio")):
+            print("[DEBUG] Step 4: gen_audio")
+            _10_gen_audio.gen_audio()
+            print("[DEBUG] Step 4 DONE: gen_audio completed")
+        with st.spinner(t("Merge full audio")):
+            print("[DEBUG] Step 5: merge_full_audio")
+            _11_merge_audio.merge_full_audio()
+            print("[DEBUG] Step 5 DONE: merge_full_audio completed")
+        with st.spinner(t("Merge dubbing to the video")):
+            print("[DEBUG] Step 6: merge_video_audio")
+            _12_dub_to_vid.merge_video_audio()
+            print("[DEBUG] Step 6 DONE: merge_video_audio completed")
+
+        print("[DEBUG] All steps completed successfully!")
+        st.success(t("Audio processing complete! 🎇"))
+        st.balloons()
+    except Exception as e:
+        print(f"[ERROR] process_audio failed: {e}")
+        traceback.print_exc()
+        st.error(f"Error: {e}")
+        raise
 
 def main():
     logo_col, _ = st.columns([1,1])
