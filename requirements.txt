@@ -31,3 +31,5 @@ syllables
 pypinyin
 g2p-en
 xmltodict
+noisereduce
+soundfile
