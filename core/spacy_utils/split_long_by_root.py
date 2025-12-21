@@ -7,6 +7,127 @@ from core.utils.models import _3_1_SPLIT_BY_NLP
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+# Minimum words per segment to avoid translation quality issues
+MIN_WORDS_PER_SEGMENT = 4
+
+
+def count_words(text, language=None):
+    """
+    Count words in text, handling both space-separated and CJK languages.
+    """
+    if not text or not isinstance(text, str):
+        return 0
+
+    text = text.strip()
+
+    # Check if text contains CJK characters
+    cjk_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or
+                   '\u3040' <= c <= '\u309f' or
+                   '\u30a0' <= c <= '\u30ff' or
+                   '\uac00' <= c <= '\ud7af')
+
+    if cjk_chars > len(text) * 0.3:  # Mostly CJK
+        return sum(1 for c in text if c.isalnum())
+    else:
+        return len(text.split())
+
+
+def is_incomplete_segment(text):
+    """
+    Check if a segment is incomplete (should be merged with neighbor).
+
+    Incomplete segments:
+    - Start with comma, period, or other punctuation
+    - Start with lowercase letter (continuation of previous sentence)
+    - Too short (handled separately by word count)
+    """
+    if not text:
+        return True
+
+    text = text.strip()
+    if not text:
+        return True
+
+    first_char = text[0]
+
+    # Starts with punctuation (comma, period, etc.)
+    if first_char in ',.:;，。：；、':
+        return True
+
+    # Starts with lowercase (for Latin languages - indicates continuation)
+    if first_char.islower() and first_char.isalpha():
+        return True
+
+    return False
+
+
+def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' '):
+    """
+    Merge segments that are too short or incomplete for good translation quality.
+
+    Merges segments that:
+    - Have fewer than min_words
+    - Start with punctuation (comma, period)
+    - Start with lowercase letter (sentence continuation)
+
+    Args:
+        sentences: List of sentence strings
+        min_words: Minimum word count per segment
+        joiner: Character to join merged segments
+
+    Returns:
+        List of merged sentences
+    """
+    if not sentences:
+        return sentences
+
+    result = []
+    current = ""
+
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+
+        word_count = count_words(sent)
+        is_incomplete = is_incomplete_segment(sent)
+
+        # Merge if too short OR incomplete (starts with comma/lowercase)
+        if word_count < min_words or is_incomplete:
+            if is_incomplete and word_count >= min_words:
+                rprint(f"[yellow]📝 Incomplete segment (starts with '{sent[0]}'): '{sent[:30]}...'[/yellow]")
+            # Short or incomplete segment - accumulate
+            if current:
+                current = current + joiner + sent
+            else:
+                current = sent
+        else:
+            # Normal segment
+            if current:
+                # We have accumulated short/incomplete segments
+                current_words = count_words(current)
+                if current_words < min_words or is_incomplete_segment(current):
+                    # Still problematic - merge with this segment
+                    sent = current + joiner + sent
+                    rprint(f"[yellow]📝 Merged segment: '{current[:30]}...' → with next[/yellow]")
+                else:
+                    # Accumulated segment is now good
+                    result.append(current)
+                current = ""
+            result.append(sent)
+
+    # Handle remaining accumulated text
+    if current:
+        if result:
+            # Merge with last segment
+            rprint(f"[yellow]📝 Merged trailing segment: '{current[:30]}...' → with previous[/yellow]")
+            result[-1] = result[-1] + joiner + current
+        else:
+            # Only problematic segments - keep as is
+            result.append(current)
+
+    return result
+
 def split_long_sentence(doc):
     tokens = [token.text for token in doc]
     n = len(tokens)
@@ -79,14 +200,29 @@ def split_long_by_root_main(nlp):
 
     punctuation = string.punctuation + "'" + '"'  # include all punctuation and apostrophe ' and "
 
+    # Filter out empty and punctuation-only lines, merge with previous
+    filtered_sentences = []
+    for i, sentence in enumerate(all_split_sentences):
+        stripped_sentence = sentence.strip()
+        if not stripped_sentence or all(char in punctuation for char in stripped_sentence):
+            rprint(f"[yellow]⚠️  Warning: Empty or punctuation-only line detected at index {i}[/yellow]")
+            if filtered_sentences:
+                filtered_sentences[-1] += sentence
+            continue
+        filtered_sentences.append(stripped_sentence)
+
+    # Merge short segments to improve translation quality
+    whisper_language = load_key("whisper.language")
+    language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
+    joiner = get_joiner(language)
+
+    original_count = len(filtered_sentences)
+    filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner)
+    if len(filtered_sentences) < original_count:
+        rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} short segments (< {MIN_WORDS_PER_SEGMENT} words)[/green]")
+
     with open(_3_1_SPLIT_BY_NLP, "w", encoding="utf-8") as output_file:
-        for i, sentence in enumerate(all_split_sentences):
-            stripped_sentence = sentence.strip()
-            if not stripped_sentence or all(char in punctuation for char in stripped_sentence):
-                rprint(f"[yellow]⚠️  Warning: Empty or punctuation-only line detected at index {i}[/yellow]")
-                if i > 0:
-                    all_split_sentences[i-1] += sentence
-                continue
+        for sentence in filtered_sentences:
             output_file.write(sentence + "\n")
 
     # delete the original file

@@ -166,7 +166,8 @@ def save_pcm_to_wav(pcm_data: bytes, save_path: str, sample_rate: int = 22050):
 
 
 def cosyvoice3_tts(text: str, save_path: str, reference_audio: str = None,
-                   reference_text: str = None, mode: str = "zero_shot"):
+                   reference_text: str = None, mode: str = "zero_shot",
+                   instruct_text: str = None):
     """
     Generate speech using CosyVoice 3.0 API
 
@@ -175,7 +176,8 @@ def cosyvoice3_tts(text: str, save_path: str, reference_audio: str = None,
         save_path: Path to save the generated audio
         reference_audio: Path to reference audio for voice cloning
         reference_text: Transcript of reference audio (required for zero_shot mode)
-        mode: "zero_shot" or "cross_lingual"
+        mode: "zero_shot", "cross_lingual", or "instruct2"
+        instruct_text: Instructions for speech style (e.g., "speak faster", "speak with energy")
     """
     api_url = get_api_url()
 
@@ -187,7 +189,21 @@ def cosyvoice3_tts(text: str, save_path: str, reference_audio: str = None,
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Prepare request based on mode
-    if mode == "zero_shot" and reference_audio and reference_text:
+    if mode == "instruct2" and reference_audio and instruct_text:
+        # Instruct2 mode: voice cloning + instruction control (speed, emotion, etc.)
+        endpoint = f"{api_url}/inference_instruct2"
+
+        with open(reference_audio, 'rb') as f:
+            files = {'prompt_wav': (Path(reference_audio).name, f, 'audio/wav')}
+            data = {
+                'tts_text': text,
+                'instruct_text': instruct_text
+            }
+
+            rprint(f"[cyan]CosyVoice instruct2 ({instruct_text}): {text[:40]}...[/cyan]")
+            response = requests.post(endpoint, files=files, data=data, timeout=120)
+
+    elif mode == "zero_shot" and reference_audio and reference_text:
         # Zero-shot voice cloning with reference text
         endpoint = f"{api_url}/inference_zero_shot"
 
@@ -235,9 +251,10 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     """
     CosyVoice 3.0 TTS integration for VideoLingo pipeline
 
-    Supports two modes:
+    Supports three modes:
     - zero_shot: Voice cloning with reference audio and text (best quality)
     - cross_lingual: Voice cloning without reference text (for different languages)
+    - instruct2: Voice cloning with instruction control (speed, emotion, etc.)
 
     Falls back to silent audio if CosyVoice fails.
 
@@ -250,7 +267,10 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     config = load_key("cosyvoice3")
 
     # Get configuration
-    MODE = config.get("mode", "cross_lingual")  # zero_shot or cross_lingual
+    MODE = config.get("mode", "cross_lingual")  # zero_shot, cross_lingual, or instruct2
+
+    # Speed instruction for instruct2 mode (e.g., "speak faster", "говори быстрее")
+    SPEED_INSTRUCTION = config.get("speed_instruction", "speak at a moderate pace")
 
     # Find reference audio FIRST
     current_dir = Path.cwd()
@@ -292,7 +312,8 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
             save_path=save_as,
             reference_audio=audio_prompt,
             reference_text=reference_text,
-            mode=MODE
+            mode=MODE,
+            instruct_text=SPEED_INSTRUCTION if MODE == "instruct2" else None
         )
         return success
     except Exception as e:
