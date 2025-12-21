@@ -32,6 +32,12 @@ def tts_main(text, save_as, number, task_df):
     print(f"Generating <{text}...>")
     TTS_METHOD = load_key("tts_method")
 
+    # Validate TTS method, fallback to chatterbox_tts for unsupported methods
+    supported_methods = ['chatterbox_tts', 'cosyvoice3']
+    if TTS_METHOD not in supported_methods:
+        rprint(f"[yellow]⚠️ tts_method='{TTS_METHOD}' not supported, using chatterbox_tts[/yellow]")
+        TTS_METHOD = 'chatterbox_tts'
+
     max_retries = 3
     for attempt in range(max_retries):
         try:
@@ -44,8 +50,6 @@ def tts_main(text, save_as, number, task_df):
                 chatterbox_tts_for_videolingo(text, save_as, number, task_df)
             elif TTS_METHOD == 'cosyvoice3':
                 cosyvoice3_tts_for_videolingo(text, save_as, number, task_df)
-            else:
-                raise ValueError(f"Unknown TTS method: {TTS_METHOD}. Supported: chatterbox_tts, cosyvoice3")
 
             # Check generated audio duration
             duration = get_audio_duration(save_as)

@@ -21,6 +21,11 @@ def transcribe():
     segments = split_audio(_RAW_AUDIO_FILE)
 
     # 4. Transcribe audio with local WhisperX
+    # Note: Only local runtime is supported in this optimized version
+    runtime = load_key("whisper.runtime")
+    if runtime != "local":
+        rprint(f"[yellow]⚠️ whisper.runtime='{runtime}' not supported, using local WhisperX[/yellow]")
+
     from core.asr_backend.whisperX_local import transcribe_audio as ts
     rprint("[cyan]🎤 Transcribing audio with local WhisperX...[/cyan]")
 
