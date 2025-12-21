@@ -92,8 +92,10 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     del model
     torch.cuda.empty_cache()
 
-    # Save language
-    update_key("whisper.language", result['language'])
+    # Save detected language (for spacy model selection and other processing)
+    detected_lang = result['language']
+    update_key("whisper.detected_language", detected_lang)
+    rprint(f"[cyan]🌍 Detected language:[/cyan] {detected_lang}")
     if result['language'] == 'zh' and WHISPER_LANGUAGE != 'zh':
         raise ValueError("Please specify the transcription language as zh and try again!")
 
