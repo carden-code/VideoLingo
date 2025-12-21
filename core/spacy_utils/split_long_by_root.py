@@ -61,6 +61,63 @@ def is_incomplete_segment(text):
     return False
 
 
+def ends_with_incomplete(text):
+    """
+    Check if a segment ends with a preposition/conjunction (incomplete sentence).
+
+    These endings indicate the sentence continues in the next segment.
+    Supports Russian and English.
+    """
+    if not text:
+        return False
+
+    text = text.strip()
+    if not text:
+        return False
+
+    # Common incomplete endings (prepositions, conjunctions, relative pronouns)
+    # Russian
+    russian_incomplete = {
+        # Prepositions
+        'на', 'в', 'во', 'к', 'ко', 'с', 'со', 'от', 'до', 'для', 'из', 'за', 'по',
+        'над', 'под', 'о', 'об', 'обо', 'при', 'у', 'через', 'между', 'про', 'без',
+        # Conjunctions
+        'и', 'но', 'а', 'или', 'что', 'чтобы', 'если', 'когда', 'потому',
+        'так', 'как', 'то', 'либо', 'однако', 'хотя', 'пока', 'поскольку',
+        # Relative pronouns (incomplete without following clause)
+        'который', 'которая', 'которое', 'которые', 'которых', 'которому',
+        'которой', 'которым', 'котором', 'которую',
+        # Demonstratives
+        'это', 'этот', 'эта', 'эти', 'этих', 'этому', 'этой',
+        'то', 'тот', 'та', 'те', 'тех', 'тому', 'той',
+    }
+
+    # English
+    english_incomplete = {
+        # Prepositions
+        'to', 'at', 'in', 'on', 'for', 'with', 'by', 'from', 'of', 'about',
+        'into', 'onto', 'upon', 'through', 'during', 'before', 'after',
+        'between', 'among', 'under', 'over', 'above', 'below',
+        # Conjunctions
+        'and', 'or', 'but', 'that', 'which', 'who', 'whom', 'whose',
+        'where', 'when', 'while', 'if', 'because', 'although', 'though',
+        'whether', 'unless', 'until', 'since', 'as', 'than',
+        # Articles (sentence shouldn't end with these)
+        'the', 'a', 'an',
+    }
+
+    incomplete_endings = russian_incomplete | english_incomplete
+
+    # Get last word, strip punctuation
+    words = text.split()
+    if not words:
+        return False
+
+    last_word = words[-1].lower().rstrip('.,;:!?，。；：')
+
+    return last_word in incomplete_endings
+
+
 def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' '):
     """
     Merge segments that are too short or incomplete for good translation quality.
@@ -69,6 +126,7 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
     - Have fewer than min_words
     - Start with punctuation (comma, period)
     - Start with lowercase letter (sentence continuation)
+    - End with preposition/conjunction (incomplete ending)
 
     Args:
         sentences: List of sentence strings
@@ -90,13 +148,20 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
             continue
 
         word_count = count_words(sent)
-        is_incomplete = is_incomplete_segment(sent)
+        starts_incomplete = is_incomplete_segment(sent)
+        ends_incomplete = ends_with_incomplete(sent)
 
-        # Merge if too short OR incomplete (starts with comma/lowercase)
-        if word_count < min_words or is_incomplete:
-            if is_incomplete and word_count >= min_words:
-                rprint(f"[yellow]📝 Incomplete segment (starts with '{sent[0]}'): '{sent[:30]}...'[/yellow]")
-            # Short or incomplete segment - accumulate
+        # Merge if too short OR starts incomplete OR ends incomplete
+        needs_merge = word_count < min_words or starts_incomplete or ends_incomplete
+
+        if needs_merge:
+            if starts_incomplete and word_count >= min_words:
+                rprint(f"[yellow]📝 Incomplete start ('{sent[0]}'): '{sent[:40]}...'[/yellow]")
+            if ends_incomplete and word_count >= min_words:
+                last_word = sent.split()[-1].rstrip('.,;:!?') if sent.split() else ''
+                rprint(f"[yellow]📝 Incomplete ending ('{last_word}'): '...{sent[-40:]}'[/yellow]")
+
+            # Accumulate segment
             if current:
                 current = current + joiner + sent
             else:
@@ -104,12 +169,15 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
         else:
             # Normal segment
             if current:
-                # We have accumulated short/incomplete segments
+                # We have accumulated incomplete segments
                 current_words = count_words(current)
-                if current_words < min_words or is_incomplete_segment(current):
+                current_starts_incomplete = is_incomplete_segment(current)
+                current_ends_incomplete = ends_with_incomplete(current)
+
+                if current_words < min_words or current_starts_incomplete or current_ends_incomplete:
                     # Still problematic - merge with this segment
                     sent = current + joiner + sent
-                    rprint(f"[yellow]📝 Merged segment: '{current[:30]}...' → with next[/yellow]")
+                    rprint(f"[yellow]📝 Merged: '{current[:30]}...' → with next[/yellow]")
                 else:
                     # Accumulated segment is now good
                     result.append(current)
@@ -120,7 +188,7 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
     if current:
         if result:
             # Merge with last segment
-            rprint(f"[yellow]📝 Merged trailing segment: '{current[:30]}...' → with previous[/yellow]")
+            rprint(f"[yellow]📝 Merged trailing: '{current[:30]}...' → with previous[/yellow]")
             result[-1] = result[-1] + joiner + current
         else:
             # Only problematic segments - keep as is
@@ -219,7 +287,7 @@ def split_long_by_root_main(nlp):
     original_count = len(filtered_sentences)
     filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner)
     if len(filtered_sentences) < original_count:
-        rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} short segments (< {MIN_WORDS_PER_SEGMENT} words)[/green]")
+        rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} incomplete segments (short/incomplete start/end)[/green]")
 
     with open(_3_1_SPLIT_BY_NLP, "w", encoding="utf-8") as output_file:
         for sentence in filtered_sentences:
