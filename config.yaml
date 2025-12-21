@@ -76,7 +76,6 @@ chatterbox_tts:
   cfg_weight: 0.4
 
 # CosyVoice 3.0 configuration (9 languages, flow matching)
-# Modes: cross_lingual (default), zero_shot (needs reference text), instruct2 (experimental)
 cosyvoice3:
   api_url: 'http://localhost:50000'
   mode: 'cross_lingual'
