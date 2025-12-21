@@ -167,20 +167,20 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ',
         else:
             # Normal segment
             if current:
-                # We have accumulated incomplete segments
-                current_words = count_words(current)
-                current_starts_incomplete = is_incomplete_segment(current)
-                current_ends_incomplete = ends_with_incomplete(current, nlp)
+                # We have accumulated incomplete segments - merge with this normal one
+                merged = current + joiner + sent
+                rprint(f"[yellow]📝 Merged: '{current[:30]}...' → with next[/yellow]")
 
-                if current_words < min_words or current_starts_incomplete or current_ends_incomplete:
-                    # Still problematic - merge with this segment
-                    sent = current + joiner + sent
-                    rprint(f"[yellow]📝 Merged: '{current[:30]}...' → with next[/yellow]")
+                # Check if merged result is now valid (doesn't start with punctuation/lowercase)
+                if is_incomplete_segment(merged):
+                    # Still starts with punctuation - keep accumulating
+                    current = merged
                 else:
-                    # Accumulated segment is now good
-                    result.append(current)
-                current = ""
-            result.append(sent)
+                    # Now valid - add to result
+                    result.append(merged)
+                    current = ""
+            else:
+                result.append(sent)
 
     # Handle remaining accumulated text
     if current:
