@@ -239,7 +239,7 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     - zero_shot: Voice cloning with reference audio and text (best quality)
     - cross_lingual: Voice cloning without reference text (for different languages)
 
-    Falls back to edge_tts if CosyVoice fails.
+    Falls back to silent audio if CosyVoice fails.
 
     Args:
         text: Text to synthesize
@@ -285,7 +285,7 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
             rprint(f"[yellow]Could not get reference text for segment {ref_number}, switching to cross_lingual mode[/yellow]")
             MODE = "cross_lingual"
 
-    # Generate TTS with fallback to edge_tts
+    # Generate TTS with fallback to silent audio
     try:
         success = cosyvoice3_tts(
             text=text,
@@ -296,16 +296,18 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
         )
         return success
     except Exception as e:
-        # Log the error and fall back to edge_tts
+        # Log the error and create silent audio as fallback
         rprint(f"[bold yellow]⚠️ FALLBACK: CosyVoice failed for segment {number}: {str(e)}[/bold yellow]")
         rprint(f"[bold yellow]⚠️ FALLBACK: Text was: '{text}'[/bold yellow]")
-        rprint(f"[bold cyan]🔄 FALLBACK: Switching to edge_tts for this segment[/bold cyan]")
+        rprint(f"[bold cyan]🔄 FALLBACK: Creating silent audio for this segment[/bold cyan]")
 
         try:
-            from core.tts_backend.edge_tts import edge_tts
-            edge_tts(text, save_as)
-            rprint(f"[bold green]✓ FALLBACK: edge_tts succeeded for segment {number}[/bold green]")
+            from pydub import AudioSegment
+            # Create 1 second of silence as placeholder
+            silence = AudioSegment.silent(duration=1000)
+            silence.export(save_as, format="wav")
+            rprint(f"[bold green]✓ FALLBACK: Silent audio created for segment {number}[/bold green]")
             return True
-        except Exception as edge_error:
-            rprint(f"[bold red]❌ FALLBACK: edge_tts also failed: {str(edge_error)}[/bold red]")
-            raise Exception(f"Both CosyVoice and edge_tts failed: CosyVoice: {e}, edge_tts: {edge_error}")
+        except Exception as fallback_error:
+            rprint(f"[bold red]❌ FALLBACK: Silent audio creation also failed: {str(fallback_error)}[/bold red]")
+            raise Exception(f"CosyVoice failed for segment {number}: {str(e)}")

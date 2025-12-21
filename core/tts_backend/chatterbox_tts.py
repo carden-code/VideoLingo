@@ -403,7 +403,7 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
     - Mode 2: Voice cloning with single reference audio
     - Mode 3: Voice cloning with per-segment reference audio
 
-    Falls back to edge_tts if Chatterbox fails (e.g., on very short text).
+    Falls back to silent audio if Chatterbox fails (e.g., on very short text).
 
     Args:
         text: Text to synthesize
@@ -461,7 +461,7 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
                 rprint(f"[bold red]Failed to extract reference audio: {str(e)}[/bold red]")
                 rprint("[yellow]Continuing without voice cloning...[/yellow]")
 
-    # Generate TTS with fallback to edge_tts
+    # Generate TTS with fallback to silent audio
     try:
         success = chatterbox_tts(
             text=text,
@@ -473,16 +473,18 @@ def chatterbox_tts_for_videolingo(text, save_as, number, task_df):
         )
         return success
     except Exception as e:
-        # Log the error and fall back to edge_tts
+        # Log the error and create silent audio as fallback
         rprint(f"[bold yellow]⚠️ FALLBACK: Chatterbox failed for segment {number}: {str(e)}[/bold yellow]")
         rprint(f"[bold yellow]⚠️ FALLBACK: Text was: '{text}'[/bold yellow]")
-        rprint(f"[bold cyan]🔄 FALLBACK: Switching to edge_tts for this segment (no voice cloning)[/bold cyan]")
+        rprint(f"[bold cyan]🔄 FALLBACK: Creating silent audio for this segment[/bold cyan]")
 
         try:
-            from core.tts_backend.edge_tts import edge_tts
-            edge_tts(text, save_as)
-            rprint(f"[bold green]✓ FALLBACK: edge_tts succeeded for segment {number}[/bold green]")
+            from pydub import AudioSegment
+            # Create 1 second of silence as placeholder
+            silence = AudioSegment.silent(duration=1000)
+            silence.export(save_as, format="wav")
+            rprint(f"[bold green]✓ FALLBACK: Silent audio created for segment {number}[/bold green]")
             return True
-        except Exception as edge_error:
-            rprint(f"[bold red]❌ FALLBACK: edge_tts also failed: {str(edge_error)}[/bold red]")
-            raise Exception(f"Both Chatterbox and edge_tts failed for segment {number}: Chatterbox: {str(e)}, edge_tts: {str(edge_error)}")
+        except Exception as fallback_error:
+            rprint(f"[bold red]❌ FALLBACK: Silent audio creation also failed: {str(fallback_error)}[/bold red]")
+            raise Exception(f"Chatterbox failed for segment {number}: {str(e)}")
