@@ -61,12 +61,18 @@ def is_incomplete_segment(text):
     return False
 
 
-def ends_with_incomplete(text):
+def ends_with_incomplete(text, nlp=None):
     """
     Check if a segment ends with a preposition/conjunction (incomplete sentence).
 
-    These endings indicate the sentence continues in the next segment.
-    Supports Russian and English.
+    Uses spacy POS tagging for dynamic language-independent detection.
+    Falls back to basic heuristics if nlp not available.
+
+    Incomplete POS tags:
+    - ADP: adposition (preposition) - "on", "в", "для"
+    - CCONJ: coordinating conjunction - "and", "и", "but"
+    - SCONJ: subordinating conjunction - "if", "если", "because"
+    - DET: determiner/article - "the", "a", "этот"
     """
     if not text:
         return False
@@ -75,50 +81,41 @@ def ends_with_incomplete(text):
     if not text:
         return False
 
-    # Common incomplete endings (prepositions, conjunctions, relative pronouns)
-    # Russian
-    russian_incomplete = {
-        # Prepositions
-        'на', 'в', 'во', 'к', 'ко', 'с', 'со', 'от', 'до', 'для', 'из', 'за', 'по',
-        'над', 'под', 'о', 'об', 'обо', 'при', 'у', 'через', 'между', 'про', 'без',
-        # Conjunctions
-        'и', 'но', 'а', 'или', 'что', 'чтобы', 'если', 'когда', 'потому',
-        'так', 'как', 'то', 'либо', 'однако', 'хотя', 'пока', 'поскольку',
-        # Relative pronouns (incomplete without following clause)
-        'который', 'которая', 'которое', 'которые', 'которых', 'которому',
-        'которой', 'которым', 'котором', 'которую',
-        # Demonstratives
-        'это', 'этот', 'эта', 'эти', 'этих', 'этому', 'этой',
-        'то', 'тот', 'та', 'те', 'тех', 'тому', 'той',
-    }
+    # Use spacy for dynamic POS-based detection
+    if nlp is not None:
+        doc = nlp(text)
+        # Get last non-punctuation token
+        last_token = None
+        for token in reversed(doc):
+            if not token.is_punct and not token.is_space:
+                last_token = token
+                break
 
-    # English
-    english_incomplete = {
-        # Prepositions
-        'to', 'at', 'in', 'on', 'for', 'with', 'by', 'from', 'of', 'about',
-        'into', 'onto', 'upon', 'through', 'during', 'before', 'after',
-        'between', 'among', 'under', 'over', 'above', 'below',
-        # Conjunctions
-        'and', 'or', 'but', 'that', 'which', 'who', 'whom', 'whose',
-        'where', 'when', 'while', 'if', 'because', 'although', 'though',
-        'whether', 'unless', 'until', 'since', 'as', 'than',
-        # Articles (sentence shouldn't end with these)
-        'the', 'a', 'an',
-    }
+        if last_token:
+            # POS tags indicating incomplete sentence
+            incomplete_pos = {'ADP', 'CCONJ', 'SCONJ', 'DET'}
+            if last_token.pos_ in incomplete_pos:
+                return True
 
-    incomplete_endings = russian_incomplete | english_incomplete
+            # Also check for relative pronouns (dependency-based)
+            if last_token.dep_ in {'mark', 'cc', 'prep', 'det'}:
+                return True
 
-    # Get last word, strip punctuation
+        return False
+
+    # Fallback: basic punctuation check (no nlp available)
     words = text.split()
     if not words:
         return False
 
     last_word = words[-1].lower().rstrip('.,;:!?，。；：')
+    # Minimal fallback list for common cases
+    basic_incomplete = {'and', 'or', 'but', 'the', 'a', 'an', 'to', 'for', 'with',
+                        'и', 'а', 'но', 'на', 'в', 'для', 'с', 'к'}
+    return last_word in basic_incomplete
 
-    return last_word in incomplete_endings
 
-
-def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' '):
+def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ', nlp=None):
     """
     Merge segments that are too short or incomplete for good translation quality.
 
@@ -126,12 +123,13 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
     - Have fewer than min_words
     - Start with punctuation (comma, period)
     - Start with lowercase letter (sentence continuation)
-    - End with preposition/conjunction (incomplete ending)
+    - End with preposition/conjunction (detected via spacy POS tagging)
 
     Args:
         sentences: List of sentence strings
         min_words: Minimum word count per segment
         joiner: Character to join merged segments
+        nlp: spacy nlp model for POS-based detection (optional)
 
     Returns:
         List of merged sentences
@@ -149,7 +147,7 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
 
         word_count = count_words(sent)
         starts_incomplete = is_incomplete_segment(sent)
-        ends_incomplete = ends_with_incomplete(sent)
+        ends_incomplete = ends_with_incomplete(sent, nlp)
 
         # Merge if too short OR starts incomplete OR ends incomplete
         needs_merge = word_count < min_words or starts_incomplete or ends_incomplete
@@ -172,7 +170,7 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
                 # We have accumulated incomplete segments
                 current_words = count_words(current)
                 current_starts_incomplete = is_incomplete_segment(current)
-                current_ends_incomplete = ends_with_incomplete(current)
+                current_ends_incomplete = ends_with_incomplete(current, nlp)
 
                 if current_words < min_words or current_starts_incomplete or current_ends_incomplete:
                     # Still problematic - merge with this segment
@@ -285,7 +283,7 @@ def split_long_by_root_main(nlp):
     joiner = get_joiner(language)
 
     original_count = len(filtered_sentences)
-    filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner)
+    filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner, nlp=nlp)
     if len(filtered_sentences) < original_count:
         rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} incomplete segments (short/incomplete start/end)[/green]")
 

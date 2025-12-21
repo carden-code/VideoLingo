@@ -3,6 +3,7 @@ from difflib import SequenceMatcher
 import math
 from core.prompts import get_split_prompt
 from core.spacy_utils.load_nlp_model import init_nlp
+from core.spacy_utils.split_long_by_root import merge_short_segments
 from core.utils import *
 from rich.console import Console
 from rich.table import Table
@@ -118,6 +119,17 @@ def split_sentences_by_meaning():
     # 🔄 process sentences multiple times to ensure all are split
     for retry_attempt in range(3):
         sentences = parallel_split_sentences(sentences, max_length=load_key("max_split_length"), max_workers=load_key("max_workers"), nlp=nlp, retry_attempt=retry_attempt)
+
+    # 🔧 Post-process: merge segments that LLM may have split incorrectly
+    # (starting with punctuation, too short, ending with preposition/conjunction)
+    whisper_language = load_key("whisper.language")
+    language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
+    joiner = get_joiner(language)
+
+    original_count = len(sentences)
+    sentences = merge_short_segments(sentences, min_words=3, joiner=joiner, nlp=nlp)
+    if len(sentences) < original_count:
+        console.print(f'[yellow]📝 Post-LLM merge: fixed {original_count - len(sentences)} problematic segments[/yellow]')
 
     # 💾 save results
     with open(_3_2_SPLIT_BY_MEANING, 'w', encoding='utf-8') as f:
