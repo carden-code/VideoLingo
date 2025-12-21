@@ -61,7 +61,61 @@ def is_incomplete_segment(text):
     return False
 
 
-def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' '):
+def ends_with_incomplete(text, nlp=None):
+    """
+    Check if a segment ends with a preposition/conjunction (incomplete sentence).
+
+    Uses spacy POS tagging for dynamic language-independent detection.
+    Falls back to basic heuristics if nlp not available.
+
+    Incomplete POS tags:
+    - ADP: adposition (preposition) - "on", "в", "для"
+    - CCONJ: coordinating conjunction - "and", "и", "but"
+    - SCONJ: subordinating conjunction - "if", "если", "because"
+    - DET: determiner/article - "the", "a", "этот"
+    """
+    if not text:
+        return False
+
+    text = text.strip()
+    if not text:
+        return False
+
+    # Use spacy for dynamic POS-based detection
+    if nlp is not None:
+        doc = nlp(text)
+        # Get last non-punctuation token
+        last_token = None
+        for token in reversed(doc):
+            if not token.is_punct and not token.is_space:
+                last_token = token
+                break
+
+        if last_token:
+            # POS tags indicating incomplete sentence
+            incomplete_pos = {'ADP', 'CCONJ', 'SCONJ', 'DET'}
+            if last_token.pos_ in incomplete_pos:
+                return True
+
+            # Also check for relative pronouns (dependency-based)
+            if last_token.dep_ in {'mark', 'cc', 'prep', 'det'}:
+                return True
+
+        return False
+
+    # Fallback: basic punctuation check (no nlp available)
+    words = text.split()
+    if not words:
+        return False
+
+    last_word = words[-1].lower().rstrip('.,;:!?，。；：')
+    # Minimal fallback list for common cases
+    basic_incomplete = {'and', 'or', 'but', 'the', 'a', 'an', 'to', 'for', 'with',
+                        'и', 'а', 'но', 'на', 'в', 'для', 'с', 'к'}
+    return last_word in basic_incomplete
+
+
+def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ', nlp=None):
     """
     Merge segments that are too short or incomplete for good translation quality.
 
@@ -69,11 +123,13 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
     - Have fewer than min_words
     - Start with punctuation (comma, period)
     - Start with lowercase letter (sentence continuation)
+    - End with preposition/conjunction (detected via spacy POS tagging)
 
     Args:
         sentences: List of sentence strings
         min_words: Minimum word count per segment
         joiner: Character to join merged segments
+        nlp: spacy nlp model for POS-based detection (optional)
 
     Returns:
         List of merged sentences
@@ -90,13 +146,20 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
             continue
 
         word_count = count_words(sent)
-        is_incomplete = is_incomplete_segment(sent)
+        starts_incomplete = is_incomplete_segment(sent)
+        ends_incomplete = ends_with_incomplete(sent, nlp)
 
-        # Merge if too short OR incomplete (starts with comma/lowercase)
-        if word_count < min_words or is_incomplete:
-            if is_incomplete and word_count >= min_words:
-                rprint(f"[yellow]📝 Incomplete segment (starts with '{sent[0]}'): '{sent[:30]}...'[/yellow]")
-            # Short or incomplete segment - accumulate
+        # Merge if too short OR starts incomplete OR ends incomplete
+        needs_merge = word_count < min_words or starts_incomplete or ends_incomplete
+
+        if needs_merge:
+            if starts_incomplete and word_count >= min_words:
+                rprint(f"[yellow]📝 Incomplete start ('{sent[0]}'): '{sent[:40]}...'[/yellow]")
+            if ends_incomplete and word_count >= min_words:
+                last_word = sent.split()[-1].rstrip('.,;:!?') if sent.split() else ''
+                rprint(f"[yellow]📝 Incomplete ending ('{last_word}'): '...{sent[-40:]}'[/yellow]")
+
+            # Accumulate segment
             if current:
                 current = current + joiner + sent
             else:
@@ -104,12 +167,15 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
         else:
             # Normal segment
             if current:
-                # We have accumulated short/incomplete segments
+                # We have accumulated incomplete segments
                 current_words = count_words(current)
-                if current_words < min_words or is_incomplete_segment(current):
+                current_starts_incomplete = is_incomplete_segment(current)
+                current_ends_incomplete = ends_with_incomplete(current, nlp)
+
+                if current_words < min_words or current_starts_incomplete or current_ends_incomplete:
                     # Still problematic - merge with this segment
                     sent = current + joiner + sent
-                    rprint(f"[yellow]📝 Merged segment: '{current[:30]}...' → with next[/yellow]")
+                    rprint(f"[yellow]📝 Merged: '{current[:30]}...' → with next[/yellow]")
                 else:
                     # Accumulated segment is now good
                     result.append(current)
@@ -120,7 +186,7 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
     if current:
         if result:
             # Merge with last segment
-            rprint(f"[yellow]📝 Merged trailing segment: '{current[:30]}...' → with previous[/yellow]")
+            rprint(f"[yellow]📝 Merged trailing: '{current[:30]}...' → with previous[/yellow]")
             result[-1] = result[-1] + joiner + current
         else:
             # Only problematic segments - keep as is
@@ -131,14 +197,14 @@ def merge_short_segments(sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=' ')
 def split_long_sentence(doc):
     tokens = [token.text for token in doc]
     n = len(tokens)
-    
+
     # dynamic programming array, dp[i] represents the optimal split scheme from the start to the ith token
     dp = [float('inf')] * (n + 1)
     dp[0] = 0
-    
+
     # record optimal split points
     prev = [0] * (n + 1)
-    
+
     for i in range(1, n + 1):
         for j in range(max(0, i - 100), i):  # limit search range to avoid overly long sentences
             if i - j >= 30:  # ensure sentence length is at least 30
@@ -147,7 +213,7 @@ def split_long_sentence(doc):
                     if dp[j] + 1 < dp[i]:
                         dp[i] = dp[j] + 1
                         prev[i] = j
-    
+
     # rebuild sentences based on optimal split points
     sentences = []
     i = n
@@ -158,17 +224,17 @@ def split_long_sentence(doc):
         j = prev[i]
         sentences.append(joiner.join(tokens[j:i]).strip())
         i = j
-    
+
     return sentences[::-1]  # reverse list to keep original order
 
 def split_extremely_long_sentence(doc):
     tokens = [token.text for token in doc]
     n = len(tokens)
-    
+
     num_parts = (n + 59) // 60  # round up
-    
+
     part_length = n // num_parts
-    
+
     sentences = []
     whisper_language = load_key("whisper.language")
     language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language # consider force english case
@@ -178,7 +244,7 @@ def split_extremely_long_sentence(doc):
         end = start + part_length if i < num_parts - 1 else n
         sentence = joiner.join(tokens[start:end])
         sentences.append(sentence)
-    
+
     return sentences
 
 
@@ -217,24 +283,19 @@ def split_long_by_root_main(nlp):
     joiner = get_joiner(language)
 
     original_count = len(filtered_sentences)
-    filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner)
+    filtered_sentences = merge_short_segments(filtered_sentences, min_words=MIN_WORDS_PER_SEGMENT, joiner=joiner, nlp=nlp)
     if len(filtered_sentences) < original_count:
-        rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} short segments (< {MIN_WORDS_PER_SEGMENT} words)[/green]")
+        rprint(f"[green]✓ Merged {original_count - len(filtered_sentences)} incomplete segments (short/incomplete start/end)[/green]")
 
     with open(_3_1_SPLIT_BY_NLP, "w", encoding="utf-8") as output_file:
         for sentence in filtered_sentences:
             output_file.write(sentence + "\n")
 
     # delete the original file
-    os.remove(SPLIT_BY_CONNECTOR_FILE)   
+    os.remove(SPLIT_BY_CONNECTOR_FILE)
 
     rprint(f"[green]💾 Long sentences split by root saved to →  {_3_1_SPLIT_BY_NLP}[/green]")
 
 if __name__ == "__main__":
     nlp = init_nlp()
     split_long_by_root_main(nlp)
-    # raw = "平口さんの盛り上げごまが初めて売れました本当に嬉しいです本当にやっぱり見た瞬間いいって言ってくれるそういうコマを作るのがやっぱりいいですよねその2ヶ月後チコさんが何やらそわそわしていましたなんか気持ち悪いやってきたのは平口さんの駒の評判を聞きつけた愛知県の収集家ですこの男性師匠大沢さんの駒も持っているといいますちょっと褒めすぎかなでも確実にファンは広がっているようです自信がない部分をすごく感じてたのでこれで自信を持って進んでくれるなっていう本当に始まったばっかりこれからいろいろ挑戦していってくれるといいなと思って今月平口さんはある場所を訪れましたこれまで数々のタイトル戦でコマを提供してきた老舗5番手平口さんのコマを扱いたいと言いますいいですねぇ困ってだんだん成長しますので大切に使ってそういう長く良い駒になる駒ですね商談が終わった後店主があるものを取り出しましたこの前の名人戦で使った駒があるんですけど去年、名人銭で使われた盛り上げごま低く盛り上げて品良くするというのは難しい素晴らしいですね平口さんが目指す高みですこういった感じで作れればまだまだですけどただ、多分、咲く。"
-    # nlp = init_nlp()
-    # doc = nlp(raw.strip())
-    # for sent in split_still_long_sentence(doc):
-    #     print(sent, '\n==========')

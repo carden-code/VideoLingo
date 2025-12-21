@@ -35,14 +35,15 @@ def time_stretch_rubberband(input_file: str, output_file: str, speed_factor: flo
         # Read audio
         audio, sr = sf.read(input_file)
 
-        # Time stretch (pyrubberband expects time_ratio = 1/speed_factor)
-        # speed_factor > 1 means faster, so time_ratio < 1
-        time_ratio = 1.0 / speed_factor
+        # pyrubberband.time_stretch rate parameter:
+        # - rate > 1.0 = faster playback = shorter duration
+        # - rate < 1.0 = slower playback = longer duration
+        # So speed_factor is passed directly (NOT 1/speed_factor!)
 
         # Use default options for rubberband 2.0
         # Note: --fine and --formant require rubberband >= 3.0
         # For 2.0, we use default settings which work well for speech
-        stretched = pyrb.time_stretch(audio, sr, time_ratio)
+        stretched = pyrb.time_stretch(audio, sr, speed_factor)
 
         # Write output
         sf.write(output_file, stretched, sr)

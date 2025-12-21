@@ -16,6 +16,7 @@ Split the given subtitle text into **{num_parts}** parts, each less than **{word
 2. MOST IMPORTANT: Keep parts roughly equal in length (minimum 3 words each)
 3. Split at natural points like punctuation marks or conjunctions
 4. If provided text is repeated words, simply split at the middle of the repeated words.
+5. NEVER place [br] immediately before punctuation (comma, period, colon, etc.). Each part must start with a letter or number, not with punctuation marks.
 
 ## Steps
 1. Analyze the sentence structure, complexity, and key splitting challenges

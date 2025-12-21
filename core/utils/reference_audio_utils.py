@@ -131,7 +131,8 @@ def find_best_reference(
         rprint(f"[red]Reference directory not found: {refers_dir}[/red]")
         return None
 
-    ref_files = list(refers_path.glob("*.wav"))
+    # Exclude already enhanced files to prevent double enhancement
+    ref_files = [f for f in refers_path.glob("*.wav") if "_enhanced" not in f.stem]
     if not ref_files:
         rprint(f"[red]No WAV files found in {refers_dir}[/red]")
         return None
