@@ -142,20 +142,32 @@ def generate_shared_prompt(previous_content_prompt, after_content_prompt, summar
 ### Points to Note
 {things_to_note_prompt}'''
 
-def get_prompt_faithfulness(lines, shared_prompt):
+def get_prompt_faithfulness(lines, shared_prompt, duration_info=None):
     TARGET_LANGUAGE = load_key("target_language")
     # Split lines by \n
     line_splits = lines.split('\n')
-    
+
     json_dict = {}
     for i, line in enumerate(line_splits, 1):
         json_dict[f"{i}"] = {"origin": line, "direct": f"direct {TARGET_LANGUAGE} translation {i}."}
     json_format = json.dumps(json_dict, indent=2, ensure_ascii=False)
 
     src_language = load_key("whisper.detected_language")
+
+    # Duration awareness hint for video dubbing
+    duration_hint = ""
+    if duration_info:
+        duration_hint = f"""
+<duration_awareness>
+⏱️ IMPORTANT: These subtitles will be spoken as voiceover in {duration_info['total_duration']:.1f} seconds.
+The original {src_language} text has ~{duration_info['src_chars']} characters.
+Keep translation concise to fit the same time window. Avoid overly verbose translations.
+</duration_awareness>
+"""
+
     prompt_faithfulness = f'''
 ## Role
-You are a professional Netflix subtitle translator, fluent in both {src_language} and {TARGET_LANGUAGE}, as well as their respective cultures. 
+You are a professional Netflix subtitle translator, fluent in both {src_language} and {TARGET_LANGUAGE}, as well as their respective cultures.
 Your expertise lies in accurately understanding the semantics and structure of the original {src_language} text and faithfully translating it into {TARGET_LANGUAGE} while preserving the original meaning.
 
 ## Task
@@ -166,7 +178,7 @@ We have a segment of original {src_language} subtitles that need to be directly 
 3. Consider the context and professional terminology
 
 {shared_prompt}
-
+{duration_hint}
 <translation_principles>
 1. Faithful to the original: Accurately convey the content and meaning of the original text, without arbitrarily changing, adding, or omitting content.
 2. Accurate terminology: Use professional terms correctly and maintain consistency in terminology.
@@ -188,7 +200,7 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
     return prompt_faithfulness.strip()
 
 
-def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt):
+def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duration_info=None):
     TARGET_LANGUAGE = load_key("target_language")
     json_format = {
         key: {
@@ -202,6 +214,29 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt):
     json_format = json.dumps(json_format, indent=2, ensure_ascii=False)
 
     src_language = load_key("whisper.detected_language")
+
+    # Duration awareness for video dubbing - critical for expressiveness step
+    duration_hint = ""
+    if duration_info:
+        # Calculate verbosity guidance
+        chars_per_sec = duration_info['src_chars'] / duration_info['total_duration'] if duration_info['total_duration'] > 0 else 15
+        verbosity_hint = ""
+        if chars_per_sec > 18:
+            verbosity_hint = "The speaker talks FAST. Keep translations SHORT and punchy."
+        elif chars_per_sec > 14:
+            verbosity_hint = "Normal speaking pace. Match the original length closely."
+        else:
+            verbosity_hint = "The speaker talks slowly. You have room for natural phrasing."
+
+        duration_hint = f"""
+<duration_awareness>
+⏱️ VIDEO DUBBING CONSTRAINT: These subtitles will be spoken in {duration_info['total_duration']:.1f} seconds.
+Original: ~{duration_info['src_chars']} characters ({chars_per_sec:.1f} chars/sec)
+{verbosity_hint}
+Prioritize conciseness over elaborate phrasing. Remove filler words and redundant expressions.
+</duration_awareness>
+"""
+
     prompt_expressiveness = f'''
 ## Role
 You are a professional Netflix subtitle translator and language consultant.
@@ -218,7 +253,7 @@ Your task is to reflect on and improve these direct translations to create more 
 5. Do not leave empty lines in the free translation, as the subtitles are for the audience to read
 
 {shared_prompt}
-
+{duration_hint}
 <Translation Analysis Steps>
 Please use a two-step thinking process to handle the text line by line:
 
@@ -232,7 +267,7 @@ Please use a two-step thinking process to handle the text line by line:
    - Ensure it's easy for {TARGET_LANGUAGE} audience to understand and accept
    - Adapt the language style to match the theme (e.g., use casual language for tutorials, professional terminology for technical content, formal language for documentaries)
 </Translation Analysis Steps>
-   
+
 ## INPUT
 <subtitles>
 {lines}

@@ -18,7 +18,21 @@ def valid_translate_result(result: dict, required_keys: list, required_sub_keys:
 
     return {"status": "success", "message": "Translation completed"}
 
-def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_to_note_prompt, summary_prompt, index = 0):
+def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_to_note_prompt, summary_prompt, index=0, duration_info=None):
+    """
+    Translate lines with optional duration awareness for video dubbing.
+
+    Args:
+        lines: Text lines to translate (newline-separated)
+        previous_content_prompt: Context from previous chunk
+        after_cotent_prompt: Context from next chunk
+        things_to_note_prompt: Terminology notes
+        summary_prompt: Video summary
+        index: Chunk index for logging
+        duration_info: Optional dict with duration info for dubbing:
+            - total_duration: Total seconds for this chunk
+            - src_chars: Character count of source text
+    """
     shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
 
     # Retry translation if the length of the original text and the translated text are not the same, or if the specified key is missing
@@ -39,7 +53,7 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
         raise ValueError(f'[red]❌ {step_name.capitalize()} translation of block {index} failed after 3 retries. Please check `output/gpt_log/error.json` for more details.[/red]')
 
     ## Step 1: Faithful to the Original Text
-    prompt1 = get_prompt_faithfulness(lines, shared_prompt)
+    prompt1 = get_prompt_faithfulness(lines, shared_prompt, duration_info)
     faith_result = retry_translation(prompt1, len(lines.split('\n')), 'faithfulness')
 
     for i in faith_result:
@@ -62,8 +76,8 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
         console.print(table)
         return translate_result, lines
 
-    ## Step 2: Express Smoothly  
-    prompt2 = get_prompt_expressiveness(faith_result, lines, shared_prompt)
+    ## Step 2: Express Smoothly
+    prompt2 = get_prompt_expressiveness(faith_result, lines, shared_prompt, duration_info)
     express_result = retry_translation(prompt2, len(lines.split('\n')), 'expressiveness')
 
     table = Table(title="Translation Results", show_header=False, box=box.ROUNDED)

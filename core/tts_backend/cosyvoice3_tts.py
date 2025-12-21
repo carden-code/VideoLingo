@@ -247,6 +247,59 @@ def cosyvoice3_tts(text: str, save_path: str, reference_audio: str = None,
     return True
 
 
+def get_speed_instruction(speed_ratio: float, target_language: str = "en") -> str:
+    """
+    Generate natural speed instruction based on estimated speed ratio.
+
+    Args:
+        speed_ratio: est_dur / tol_dur - how much speedup is needed
+                     > 1.0 = need faster speech, < 1.0 = can speak slower
+        target_language: Target language for instruction (en, ru, zh, etc.)
+
+    Returns:
+        Natural language instruction for speech speed
+    """
+    # Speed instruction templates by language
+    instructions = {
+        "en": {
+            "very_fast": "speak quickly and energetically",
+            "fast": "speak at a brisk pace",
+            "slightly_fast": "speak slightly faster than normal",
+            "normal": "speak naturally",
+            "slow": "speak slowly and clearly",
+        },
+        "ru": {
+            "very_fast": "говори быстро и энергично",
+            "fast": "говори в быстром темпе",
+            "slightly_fast": "говори немного быстрее обычного",
+            "normal": "говори естественно",
+            "slow": "говори медленно и чётко",
+        },
+        "zh": {
+            "very_fast": "快速而有活力地说话",
+            "fast": "用较快的速度说话",
+            "slightly_fast": "稍微快一点说话",
+            "normal": "自然地说话",
+            "slow": "慢慢地清晰地说话",
+        }
+    }
+
+    # Default to English if language not supported
+    lang_instructions = instructions.get(target_language, instructions["en"])
+
+    # Map speed ratio to instruction level
+    if speed_ratio >= 1.35:
+        return lang_instructions["very_fast"]
+    elif speed_ratio >= 1.2:
+        return lang_instructions["fast"]
+    elif speed_ratio >= 1.1:
+        return lang_instructions["slightly_fast"]
+    elif speed_ratio <= 0.85:
+        return lang_instructions["slow"]
+    else:
+        return lang_instructions["normal"]
+
+
 def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     """
     CosyVoice 3.0 TTS integration for VideoLingo pipeline
@@ -255,6 +308,7 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     - zero_shot: Voice cloning with reference audio and text (best quality)
     - cross_lingual: Voice cloning without reference text (for different languages)
     - instruct2: Voice cloning with instruction control (speed, emotion, etc.)
+    - instruct2_auto: Automatic speed control based on duration estimation
 
     Falls back to silent audio if CosyVoice fails.
 
@@ -267,10 +321,38 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     config = load_key("cosyvoice3")
 
     # Get configuration
-    MODE = config.get("mode", "cross_lingual")  # zero_shot, cross_lingual, or instruct2
+    MODE = config.get("mode", "cross_lingual")  # zero_shot, cross_lingual, instruct2, or instruct2_auto
 
-    # Speed instruction for instruct2 mode (e.g., "speak faster", "говори быстрее")
-    SPEED_INSTRUCTION = config.get("speed_instruction", "speak at a moderate pace")
+    # Get estimated speed ratio from task DataFrame (if available)
+    speed_ratio = 1.0
+    if 'est_speed_ratio' in task_df.columns:
+        try:
+            ratio_values = task_df.loc[task_df['number'] == number, 'est_speed_ratio'].values
+            if len(ratio_values) > 0:
+                speed_ratio = float(ratio_values[0])
+        except (KeyError, IndexError, TypeError):
+            pass
+
+    # Generate dynamic speed instruction for instruct2_auto mode
+    if MODE == "instruct2_auto":
+        # Map target_language name to language code
+        target_lang_name = load_key("target_language", "English").lower()
+        lang_name_to_code = {
+            'english': 'en', 'русский': 'ru', 'russian': 'ru',
+            'chinese': 'zh', '中文': 'zh', 'japanese': 'ja', '日本語': 'ja',
+            'korean': 'ko', '한국어': 'ko', 'german': 'de', 'deutsch': 'de',
+            'french': 'fr', 'français': 'fr', 'spanish': 'es', 'español': 'es',
+            'italian': 'it', 'italiano': 'it',
+        }
+        target_lang = lang_name_to_code.get(target_lang_name, 'en')
+
+        SPEED_INSTRUCTION = get_speed_instruction(speed_ratio, target_lang)
+        MODE = "instruct2"  # Use instruct2 endpoint
+        if speed_ratio > 1.1 or speed_ratio < 0.9:
+            rprint(f"[cyan]🎚️ Speed ratio {speed_ratio:.2f} → '{SPEED_INSTRUCTION}'[/cyan]")
+    else:
+        # Static speed instruction for manual instruct2 mode
+        SPEED_INSTRUCTION = config.get("speed_instruction", "speak at a moderate pace")
 
     # Find reference audio FIRST
     current_dir = Path.cwd()
