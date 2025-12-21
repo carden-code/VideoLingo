@@ -44,7 +44,8 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     
     if device == "cuda":
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        batch_size = 16 if gpu_mem > 8 else 2
+        # Reduced batch_size to allow coexistence with TTS models (CosyVoice/Chatterbox)
+        batch_size = 4 if gpu_mem > 8 else 2
         compute_type = "float16" if torch.cuda.is_bf16_supported() else "int8"
         rprint(f"[cyan]🎮 GPU memory:[/cyan] {gpu_mem:.2f} GB, [cyan]📦 Batch size:[/cyan] {batch_size}, [cyan]⚙️ Compute type:[/cyan] {compute_type}")
     else:

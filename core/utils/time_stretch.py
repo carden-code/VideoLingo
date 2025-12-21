@@ -39,16 +39,10 @@ def time_stretch_rubberband(input_file: str, output_file: str, speed_factor: flo
         # speed_factor > 1 means faster, so time_ratio < 1
         time_ratio = 1.0 / speed_factor
 
-        # Use speech-optimized options
-        stretched = pyrb.time_stretch(
-            audio,
-            sr,
-            time_ratio,
-            rbargs={
-                '--fine': '',           # Fine pitch detection for speech
-                '--formant': '',        # Preserve formants (important for speech)
-            }
-        )
+        # Use default options for rubberband 2.0
+        # Note: --fine and --formant require rubberband >= 3.0
+        # For 2.0, we use default settings which work well for speech
+        stretched = pyrb.time_stretch(audio, sr, time_ratio)
 
         # Write output
         sf.write(output_file, stretched, sr)
