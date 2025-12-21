@@ -1,5 +1,6 @@
 import pandas as pd
 import json
+import os
 import concurrent.futures
 from core.translate_lines import translate_lines
 from core._4_1_summarize import search_things_to_note_in_prompt
@@ -11,6 +12,108 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from difflib import SequenceMatcher
 from core.utils.models import *
 console = Console()
+
+# Global duration map for duration-aware translation
+_DURATION_MAP = None
+
+
+def load_duration_map():
+    """
+    Load duration data from cleaned_chunks.xlsx for duration-aware translation.
+    Returns a dict mapping normalized text to duration info.
+    """
+    global _DURATION_MAP
+    if _DURATION_MAP is not None:
+        return _DURATION_MAP
+
+    _DURATION_MAP = {}
+
+    if not os.path.exists(_2_CLEANED_CHUNKS):
+        console.print("[dim]Duration-aware translation: cleaned_chunks.xlsx not found[/dim]")
+        return _DURATION_MAP
+
+    try:
+        df = pd.read_excel(_2_CLEANED_CHUNKS)
+        if 'text' in df.columns and 'start' in df.columns and 'end' in df.columns:
+            for _, row in df.iterrows():
+                text = str(row['text']).strip().strip('"')
+                duration = float(row['end']) - float(row['start'])
+                # Store with normalized text as key
+                normalized = ''.join(text.lower().split())
+                _DURATION_MAP[normalized] = {
+                    'duration': duration,
+                    'chars': len(text)
+                }
+            console.print(f"[cyan]⏱️ Duration-aware translation: loaded {len(_DURATION_MAP)} segments[/cyan]")
+        else:
+            console.print("[dim]Duration-aware translation: required columns not found[/dim]")
+    except Exception as e:
+        console.print(f"[dim]Duration-aware translation: failed to load ({e})[/dim]")
+
+    return _DURATION_MAP
+
+
+def estimate_chunk_duration(chunk_text):
+    """
+    Estimate total duration for a chunk of text by matching sentences.
+    Falls back to character-based estimation if no matches found.
+
+    Args:
+        chunk_text: Multi-line text chunk
+
+    Returns:
+        dict with 'total_duration' and 'src_chars', or None if not available
+    """
+    duration_map = load_duration_map()
+    if not duration_map:
+        return None
+
+    sentences = chunk_text.strip().split('\n')
+    total_duration = 0
+    total_chars = 0
+    matched = 0
+
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+
+        normalized = ''.join(sentence.lower().split())
+        total_chars += len(sentence)
+
+        # Try exact match first
+        if normalized in duration_map:
+            total_duration += duration_map[normalized]['duration']
+            matched += 1
+        else:
+            # Try partial match (sentence might be split differently)
+            for key, value in duration_map.items():
+                if normalized in key or key in normalized:
+                    # Proportional duration based on character ratio
+                    ratio = len(normalized) / len(key) if len(key) > 0 else 1
+                    total_duration += value['duration'] * min(ratio, 1.5)
+                    matched += 1
+                    break
+
+    # If less than half matched, use character-based estimation
+    # Average speaking rate: ~15 chars/sec for most languages
+    if matched < len(sentences) / 2:
+        estimated_duration = total_chars / 15.0
+        return {
+            'total_duration': estimated_duration,
+            'src_chars': total_chars,
+            'estimated': True
+        }
+
+    if total_duration > 0:
+        return {
+            'total_duration': total_duration,
+            'src_chars': total_chars,
+            'estimated': False
+        }
+
+    return None
+
 
 # Function to split text into chunks
 def split_chunks_by_chars(chunk_size, max_i): 
@@ -43,7 +146,15 @@ def translate_chunk(chunk, chunks, theme_prompt, i):
     things_to_note_prompt = search_things_to_note_in_prompt(chunk)
     previous_content_prompt = get_previous_content(chunks, i)
     after_content_prompt = get_after_content(chunks, i)
-    translation, english_result = translate_lines(chunk, previous_content_prompt, after_content_prompt, things_to_note_prompt, theme_prompt, i)
+
+    # Calculate duration info for duration-aware translation
+    duration_info = estimate_chunk_duration(chunk)
+
+    translation, english_result = translate_lines(
+        chunk, previous_content_prompt, after_content_prompt,
+        things_to_note_prompt, theme_prompt, i,
+        duration_info=duration_info
+    )
     return i, english_result, translation
 
 # Add similarity calculation function
@@ -54,6 +165,10 @@ def similar(a, b):
 @check_file_exists(_4_2_TRANSLATION)
 def translate_all():
     console.print("[bold green]Start Translating All...[/bold green]")
+
+    # Pre-load duration map for duration-aware translation
+    load_duration_map()
+
     chunks = split_chunks_by_chars(chunk_size=600, max_i=10)
     with open(_4_1_TERMINOLOGY, 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')

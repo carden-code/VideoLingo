@@ -76,10 +76,17 @@ chatterbox_tts:
   cfg_weight: 0.4
 
 # CosyVoice 3.0 configuration (9 languages, flow matching)
+# Modes:
+#   - cross_lingual: Voice cloning without reference text (most stable)
+#   - zero_shot: Voice cloning with reference text (best voice quality)
+#   - instruct2: Manual speed/emotion control via speed_instruction
+#   - instruct2_auto: Automatic speed control based on duration estimation (reduces time stretching)
 cosyvoice3:
   api_url: 'http://localhost:50000'
   mode: 'cross_lingual'
   sample_rate: 22050
+  # For instruct2 mode only (manual instruction):
+  # speed_instruction: 'speak naturally'
 
 # Audio speed range
 speed_factor:

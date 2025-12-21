@@ -96,6 +96,13 @@ def analyze_subtitle_timing_and_speed(df):
             return 0
     
     df['if_too_fast'] = df.apply(calc_if_too_fast, axis=1)
+
+    # Calculate estimated speed ratio for TTS speed control
+    # This allows TTS to generate speech at appropriate speed from the start
+    # ratio > 1.0 means we need faster speech, < 1.0 means slower
+    df['est_speed_ratio'] = df['est_dur'] / df['tol_dur']
+    df['est_speed_ratio'] = df['est_speed_ratio'].clip(lower=0.8, upper=1.5)  # Reasonable limits
+
     return df
 
 def process_cutoffs(df):
