@@ -38,8 +38,12 @@ def is_incomplete_segment(text):
 
     Incomplete segments:
     - Start with comma, period, or other punctuation
-    - Start with lowercase letter (continuation of previous sentence)
+    - Start with lowercase LATIN letter (for English - indicates continuation)
     - Too short (handled separately by word count)
+
+    Note: Cyrillic lowercase is NOT considered incomplete since Russian/Ukrainian
+    sentences after commas often start with lowercase conjunctions like "который", "но", "а"
+    which are legitimate sentence starters after comma splits.
     """
     if not text:
         return True
@@ -54,8 +58,9 @@ def is_incomplete_segment(text):
     if first_char in ',.:;，。：；、':
         return True
 
-    # Starts with lowercase (for Latin languages - indicates continuation)
-    if first_char.islower() and first_char.isalpha():
+    # Starts with lowercase LATIN letter only (a-z) - for English continuation detection
+    # Cyrillic lowercase (а-я) is intentionally excluded to avoid over-merging in Russian
+    if first_char.islower() and first_char.isascii():
         return True
 
     return False
