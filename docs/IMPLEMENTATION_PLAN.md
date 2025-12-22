@@ -796,7 +796,9 @@ def merge_video_audio_with_ducking():
 
 ---
 
-## P2.2 — Правильная ремедиация duration mismatch
+## P2.2 — Правильная ремедиация duration mismatch ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/28
 
 **Файл:** `core/_10_gen_audio.py`
 
@@ -894,7 +896,9 @@ Output JSON: {{"shortened": "shorter version here"}}
 
 ---
 
-## P2.3 — VAD для уточнения стартов сегментов
+## P2.3 — VAD для уточнения стартов сегментов ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/28
 
 ### Проблема
 Разные языки имеют разную длину и паузы, из-за чего старт фразы может уезжать от движения губ.
