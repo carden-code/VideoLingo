@@ -733,7 +733,9 @@ for segment in segments:
 
 ---
 
-## P2.1 — Ducking для фона
+## P2.1 — Ducking для фона ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/27
 
 **Файл:** `core/_12_dub_to_vid.py`
 
