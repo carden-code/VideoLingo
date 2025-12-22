@@ -485,7 +485,9 @@ def split_by_meaning():
 
 ---
 
-## P1.1 — Сохранение ASR confidence сигналов
+## P1.1 — Сохранение ASR confidence сигналов ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/25
 
 **Файл:** `core/asr_backend/whisperX_local.py`
 
