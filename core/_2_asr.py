@@ -2,7 +2,8 @@ from core.utils import *
 from core.asr_backend.demucs_vl import demucs_audio
 from core.asr_backend.audio_preprocess import (
     process_transcription, convert_video_to_audio, split_audio,
-    save_results, normalize_audio_volume, deduplicate_segments
+    save_results, normalize_audio_volume, deduplicate_segments,
+    build_segments_df, save_segment_results
 )
 from core._1_ytdlp import find_video_files
 from core.utils.models import *
@@ -41,7 +42,11 @@ def transcribe():
     # 5. Combine results with deduplication at chunk boundaries
     combined_result = deduplicate_segments(all_results, segments, overlap=CHUNK_OVERLAP)
 
-    # 6. Process df
+    # 6. Save segment-level metadata
+    segments_df = build_segments_df(combined_result)
+    save_segment_results(segments_df)
+
+    # 7. Process df
     df = process_transcription(combined_result)
     save_results(df)
 

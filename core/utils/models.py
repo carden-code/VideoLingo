@@ -3,6 +3,7 @@
 # ------------------------------------------
 
 _2_CLEANED_CHUNKS = "output/log/cleaned_chunks.xlsx"
+_2_ASR_SEGMENTS = "output/log/asr_segments.xlsx"
 _3_1_SPLIT_BY_NLP = "output/log/split_by_nlp.txt"
 _3_2_SPLIT_BY_MEANING = "output/log/split_by_meaning.txt"
 _3_2_SEGMENTS = "output/log/segments.xlsx"
@@ -32,6 +33,7 @@ _AUDIO_TMP_DIR = "output/audio/tmp"
 
 __all__ = [
     "_2_CLEANED_CHUNKS",
+    "_2_ASR_SEGMENTS",
     "_3_1_SPLIT_BY_NLP",
     "_3_2_SPLIT_BY_MEANING",
     "_3_2_SEGMENTS",

@@ -85,6 +85,7 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     transcribe_start_time = time.time()
     rprint("[bold green]Note: You will see Progress if working correctly ↓[/bold green]")
     result = model.transcribe(raw_audio_segment, batch_size=batch_size, print_progress=True)
+    raw_segments = result.get("segments", [])
     transcribe_time = time.time() - transcribe_start_time
     rprint(f"[cyan]⏱️ time transcribe:[/cyan] {transcribe_time:.2f}s")
 
@@ -105,13 +106,40 @@ def transcribe_audio(raw_audio_file, vocal_audio_file, start, end):
     align_start_time = time.time()
     # Align timestamps using vocal audio
     model_a, metadata = whisperx.load_align_model(language_code=result["language"], device=device)
-    result = whisperx.align(result["segments"], model_a, metadata, vocal_audio_segment, device, return_char_alignments=False)
+    result = whisperx.align(raw_segments, model_a, metadata, vocal_audio_segment, device, return_char_alignments=False)
     align_time = time.time() - align_start_time
     rprint(f"[cyan]⏱️ time align:[/cyan] {align_time:.2f}s")
 
     # Free GPU resources again
     torch.cuda.empty_cache()
     del model_a
+
+    def attach_confidence(aligned_segments, original_segments):
+        fields = ["avg_logprob", "no_speech_prob", "compression_ratio", "temperature", "tokens"]
+        if not aligned_segments or not original_segments:
+            return
+        if len(aligned_segments) == len(original_segments):
+            pairs = zip(aligned_segments, original_segments)
+        else:
+            pairs = []
+            raw_idx = 0
+            for seg in aligned_segments:
+                seg_text = str(seg.get("text", "")).strip()
+                match_idx = None
+                for j in range(raw_idx, len(original_segments)):
+                    raw_text = str(original_segments[j].get("text", "")).strip()
+                    if raw_text == seg_text:
+                        match_idx = j
+                        break
+                if match_idx is not None:
+                    pairs.append((seg, original_segments[match_idx]))
+                    raw_idx = match_idx + 1
+        for aligned, raw in pairs:
+            for field in fields:
+                if field in raw:
+                    aligned[field] = raw[field]
+
+    attach_confidence(result.get("segments", []), raw_segments)
 
     # Adjust timestamps
     for segment in result['segments']:

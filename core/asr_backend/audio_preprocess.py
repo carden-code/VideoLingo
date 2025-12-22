@@ -1,3 +1,4 @@
+import json
 import os, subprocess
 import pandas as pd
 from typing import Dict, List, Tuple
@@ -166,6 +167,13 @@ def process_transcription(result: Dict) -> pd.DataFrame:
     for segment in result['segments']:
         # Get speaker_id, if not exists, set to None
         speaker_id = segment.get('speaker_id', None)
+        segment_logprob = segment.get('avg_logprob', None)
+        segment_no_speech = segment.get('no_speech_prob', None)
+        segment_compression = segment.get('compression_ratio', None)
+        segment_temperature = segment.get('temperature', None)
+        segment_tokens = segment.get('tokens', None)
+        if isinstance(segment_tokens, (list, tuple)):
+            segment_tokens = json.dumps(segment_tokens, ensure_ascii=True)
         
         for word in segment['words']:
             # Check word length
@@ -183,7 +191,12 @@ def process_transcription(result: Dict) -> pd.DataFrame:
                         'text': word["word"],
                         'start': all_words[-1]['end'],
                         'end': all_words[-1]['end'],
-                        'speaker_id': speaker_id
+                        'speaker_id': speaker_id,
+                        'avg_logprob': segment_logprob,
+                        'no_speech_prob': segment_no_speech,
+                        'compression_ratio': segment_compression,
+                        'temperature': segment_temperature,
+                        'tokens': segment_tokens
                     }
                     all_words.append(word_dict)
                 else:
@@ -194,7 +207,12 @@ def process_transcription(result: Dict) -> pd.DataFrame:
                             'text': word["word"],
                             'start': next_word["start"],
                             'end': next_word["end"],
-                            'speaker_id': speaker_id
+                            'speaker_id': speaker_id,
+                            'avg_logprob': segment_logprob,
+                            'no_speech_prob': segment_no_speech,
+                            'compression_ratio': segment_compression,
+                            'temperature': segment_temperature,
+                            'tokens': segment_tokens
                         }
                         all_words.append(word_dict)
                     else:
@@ -205,12 +223,41 @@ def process_transcription(result: Dict) -> pd.DataFrame:
                     'text': f'{word["word"]}',
                     'start': word.get('start', all_words[-1]['end'] if all_words else 0),
                     'end': word['end'],
-                    'speaker_id': speaker_id
+                    'speaker_id': speaker_id,
+                    'avg_logprob': segment_logprob,
+                    'no_speech_prob': segment_no_speech,
+                    'compression_ratio': segment_compression,
+                    'temperature': segment_temperature,
+                    'tokens': segment_tokens
                 }
                 
                 all_words.append(word_dict)
     
     return pd.DataFrame(all_words)
+
+def build_segments_df(result: Dict) -> pd.DataFrame:
+    segments = []
+    for i, segment in enumerate(result.get('segments', [])):
+        tokens = segment.get('tokens', None)
+        if isinstance(tokens, (list, tuple)):
+            tokens = json.dumps(tokens, ensure_ascii=True)
+        start = segment.get('start', None)
+        end = segment.get('end', None)
+        segments.append({
+            'segment_id': f"asr_seg_{i + 1:04d}",
+            'start': start,
+            'end': end,
+            'duration': (end - start) if start is not None and end is not None else None,
+            'text': str(segment.get('text', '')).strip(),
+            'speaker_id': segment.get('speaker_id', None),
+            'avg_logprob': segment.get('avg_logprob', None),
+            'no_speech_prob': segment.get('no_speech_prob', None),
+            'compression_ratio': segment.get('compression_ratio', None),
+            'temperature': segment.get('temperature', None),
+            'tokens': tokens,
+            'word_count': len(segment.get('words', []))
+        })
+    return pd.DataFrame(segments)
 
 def save_results(df: pd.DataFrame):
     os.makedirs('output/log', exist_ok=True)
@@ -231,6 +278,11 @@ def save_results(df: pd.DataFrame):
     df['text'] = df['text'].apply(lambda x: f'"{x}"')
     df.to_excel(_2_CLEANED_CHUNKS, index=False)
     rprint(f"[green]📊 Excel file saved to {_2_CLEANED_CHUNKS}[/green]")
+
+def save_segment_results(df: pd.DataFrame):
+    os.makedirs('output/log', exist_ok=True)
+    df.to_excel(_2_ASR_SEGMENTS, index=False)
+    rprint(f"[green]📊 ASR segments saved to {_2_ASR_SEGMENTS}[/green]")
 
 def save_language(language: str):
     update_key("whisper.detected_language", language)
