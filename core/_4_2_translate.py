@@ -13,6 +13,92 @@ from difflib import SequenceMatcher
 from core.utils.models import *
 console = Console()
 
+
+def verify_translation_quality(src_text: list, trans_text: list, sample_size: int = 5) -> bool:
+    """
+    Optional LLM-based verification of translation quality.
+    Samples a few translations and asks LLM to verify they make sense.
+
+    Args:
+        src_text: List of source text lines
+        trans_text: List of translated text lines
+        sample_size: Number of samples to verify (default 5)
+
+    Returns:
+        True if verification passes, raises ValueError if critical issues found
+    """
+    if not load_key("verify_translation", False):
+        return True  # Skip if not enabled in config
+
+    console.print("[cyan]🔍 Running LLM translation verification...[/cyan]")
+
+    # Sample evenly distributed lines
+    total = len(src_text)
+    if total <= sample_size:
+        indices = list(range(total))
+    else:
+        step = total // sample_size
+        indices = [i * step for i in range(sample_size)]
+
+    # Build verification prompt
+    samples = []
+    for idx in indices:
+        if idx < len(src_text) and idx < len(trans_text):
+            src = src_text[idx].strip()
+            trans = trans_text[idx].strip()
+            if src and trans:
+                samples.append(f"{idx + 1}. Source: \"{src}\"\n   Translation: \"{trans}\"")
+
+    if not samples:
+        console.print("[yellow]⚠️ No samples to verify[/yellow]")
+        return True
+
+    target_lang = load_key("target_language", "English")
+    prompt = f"""You are a translation quality checker. Verify these {len(samples)} translation samples.
+
+Target language: {target_lang}
+
+Samples:
+{chr(10).join(samples)}
+
+Check each sample for:
+1. Is the translation semantically correct (meaning preserved)?
+2. Is it in the correct target language?
+3. Is it complete (not truncated or garbled)?
+
+Respond in JSON format:
+{{
+  "passed": true/false,
+  "issues": ["list of issues if any, empty if passed"],
+  "critical": true/false (true = translation is unusable)
+}}"""
+
+    try:
+        result = ask_gpt(prompt, resp_type='json', log_title='verify_translation')
+
+        if result.get('critical', False):
+            issues = result.get('issues', ['Unknown critical issue'])
+            console.print(f"[bold red]❌ CRITICAL translation issues found:[/bold red]")
+            for issue in issues:
+                console.print(f"[red]   • {issue}[/red]")
+            raise ValueError(f"Translation verification failed: {'; '.join(issues)}")
+
+        if not result.get('passed', True):
+            issues = result.get('issues', [])
+            console.print(f"[yellow]⚠️ Translation quality warnings:[/yellow]")
+            for issue in issues:
+                console.print(f"[yellow]   • {issue}[/yellow]")
+        else:
+            console.print(f"[green]✓ Translation verification passed ({len(samples)} samples checked)[/green]")
+
+        return True
+
+    except Exception as e:
+        if "Translation verification failed" in str(e):
+            raise
+        console.print(f"[yellow]⚠️ Verification skipped due to error: {e}[/yellow]")
+        return True
+
 # Global duration map for duration-aware translation
 _DURATION_MAP = None
 
@@ -116,10 +202,11 @@ def estimate_chunk_duration(chunk_text):
 
 
 # Function to split text into chunks
-def split_chunks_by_chars(chunk_size, max_i): 
+def split_chunks_by_chars(chunk_size, max_i, sentences=None):
     """Split text into chunks based on character count, return a list of multi-line text chunks"""
-    with open(_3_2_SPLIT_BY_MEANING, "r", encoding="utf-8") as file:
-        sentences = file.read().strip().split('\n')
+    if sentences is None:
+        with open(_3_2_SPLIT_BY_MEANING, "r", encoding="utf-8") as file:
+            sentences = file.read().strip().split('\n')
 
     chunks = []
     chunk = ''
@@ -134,6 +221,11 @@ def split_chunks_by_chars(chunk_size, max_i):
             sentence_count += 1
     chunks.append(chunk.strip())
     return chunks
+
+def load_segments_df():
+    if os.path.exists(_3_2_SEGMENTS):
+        return pd.read_excel(_3_2_SEGMENTS)
+    return None
 
 # Get context from surrounding chunks
 def get_previous_content(chunks, chunk_index):
@@ -169,7 +261,13 @@ def translate_all():
     # Pre-load duration map for duration-aware translation
     load_duration_map()
 
-    chunks = split_chunks_by_chars(chunk_size=600, max_i=10)
+    segments_df = load_segments_df()
+    if segments_df is not None and 'text' in segments_df.columns:
+        sentences = segments_df['text'].fillna("").astype(str).tolist()
+        segments_df = segments_df.reset_index(drop=True)
+    else:
+        sentences = None
+    chunks = split_chunks_by_chars(chunk_size=600, max_i=10, sentences=sentences)
     with open(_4_1_TERMINOLOGY, 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')
 
@@ -190,9 +288,22 @@ def translate_all():
     
     # 💾 Save results to lists and Excel file
     src_text, trans_text = [], []
+    segment_ids = []
+    word_start_idxs = []
+    word_end_idxs = []
+    segment_cursor = 0
     for i, chunk in enumerate(chunks):
         chunk_lines = chunk.split('\n')
         src_text.extend(chunk_lines)
+
+        if segments_df is not None:
+            chunk_seg = segments_df.iloc[segment_cursor:segment_cursor + len(chunk_lines)]
+            segment_ids.extend(chunk_seg['segment_id'].tolist())
+            if 'word_start_idx' in chunk_seg.columns:
+                word_start_idxs.extend(chunk_seg['word_start_idx'].tolist())
+            if 'word_end_idx' in chunk_seg.columns:
+                word_end_idxs.extend(chunk_seg['word_end_idx'].tolist())
+            segment_cursor += len(chunk_lines)
         
         # Calculate similarity between current chunk and translation results
         chunk_text = ''.join(chunk_lines).lower()
@@ -207,12 +318,37 @@ def translate_all():
         elif best_match[1] < 1.0:
             console.print(f"[yellow]Warning: Similar match found (chunk {i}, similarity: {best_match[1]:.3f})[/yellow]")
             
-        trans_text.extend(best_match[0][2].split('\n'))
-    
+        # Validate and extend translations
+        translations = best_match[0][2].split('\n')
+
+        # Check for empty translations (critical validation)
+        for j, trans in enumerate(translations):
+            if not trans or not trans.strip():
+                console.print(f"[bold red]❌ CRITICAL: Empty translation detected![/bold red]")
+                console.print(f"[red]   Chunk {i}, line {j}: source='{chunk_lines[j] if j < len(chunk_lines) else 'N/A'}'[/red]")
+                raise ValueError(f"Empty translation in chunk {i}, line {j}. LLM returned empty result. Check output/gpt_log/error.json")
+
+        trans_text.extend(translations)
+
+    # Final validation: source and translation must have same line count
+    if len(src_text) != len(trans_text):
+        console.print(f"[bold red]❌ CRITICAL: Line count mismatch![/bold red]")
+        console.print(f"[red]   Source lines: {len(src_text)}, Translation lines: {len(trans_text)}[/red]")
+        raise ValueError(f"Translation alignment failed: {len(src_text)} source lines vs {len(trans_text)} translation lines")
+
+    # Optional LLM-based quality verification (enable with verify_translation: true in config)
+    verify_translation_quality(src_text, trans_text)
+
     # Trim long translation text
     df_text = pd.read_excel(_2_CLEANED_CHUNKS)
     df_text['text'] = df_text['text'].str.strip('"').str.strip()
     df_translate = pd.DataFrame({'Source': src_text, 'Translation': trans_text})
+    if segment_ids:
+        df_translate.insert(0, 'segment_id', segment_ids)
+    if word_start_idxs:
+        df_translate['word_start_idx'] = word_start_idxs
+    if word_end_idxs:
+        df_translate['word_end_idx'] = word_end_idxs
     subtitle_output_configs = [('trans_subs_for_audio.srt', ['Translation'])]
     df_time = align_timestamp(df_text, df_translate, subtitle_output_configs, output_dir=None, for_display=False)
     console.print(df_time)
