@@ -26,14 +26,20 @@ def transcribe():
     # 3. Split audio with overlap for better word boundary handling
     segments = split_audio(_RAW_AUDIO_FILE, overlap=CHUNK_OVERLAP)
 
-    # 4. Transcribe audio with local WhisperX
-    # Note: Only local runtime is supported in this optimized version
+    # 4. Transcribe audio by clips
     runtime = load_key("whisper.runtime")
-    if runtime != "local":
-        rprint(f"[yellow]⚠️ whisper.runtime='{runtime}' not supported, using local WhisperX[/yellow]")
-
-    from core.asr_backend.whisperX_local import transcribe_audio as ts
-    rprint("[cyan]🎤 Transcribing audio with local WhisperX...[/cyan]")
+    if runtime == "local":
+        from core.asr_backend.whisperX_local import transcribe_audio as ts
+        rprint("[cyan]🎤 Transcribing audio with local WhisperX...[/cyan]")
+    elif runtime == "cloud":
+        from core.asr_backend.whisperX_302 import transcribe_audio_302 as ts
+        rprint("[cyan]🎤 Transcribing audio with 302 API...[/cyan]")
+    elif runtime == "elevenlabs":
+        from core.asr_backend.elevenlabs_asr import transcribe_audio_elevenlabs as ts
+        rprint("[cyan]🎤 Transcribing audio with ElevenLabs API...[/cyan]")
+    else:
+        rprint(f"[yellow]⚠️ whisper.runtime='{runtime}' not recognized, using local WhisperX[/yellow]")
+        from core.asr_backend.whisperX_local import transcribe_audio as ts
 
     all_results = []
     for start, end in segments:

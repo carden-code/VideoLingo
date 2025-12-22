@@ -125,26 +125,26 @@ def deduplicate_segments(all_results: List[Tuple[float, float, Dict]],
     """
     combined = {'segments': []}
     drop_before = None  # Skip words before this time (end of overlap)
+    eps = 1e-3
 
     for i, (chunk_start, chunk_end, result) in enumerate(all_results):
         if i > 0:
             # Words in this chunk that start before drop_before should be skipped
             # because they were already captured by the previous chunk
             prev_end = segments[i - 1][1]
-            drop_before = max(chunk_start, prev_end - overlap - tolerance)
+            drop_before = max(chunk_start, prev_end - tolerance)
 
         for segment in result.get('segments', []):
             new_words = []
             for word in segment.get('words', []):
                 word_start = word.get('start')
-                word_end = word.get('end', word_start)
 
                 if word_start is None:
                     word_start = segment.get('start')
 
                 # Skip words that were already covered by the previous chunk
                 if word_start is not None and drop_before is not None:
-                    if word_start < (drop_before + tolerance):
+                    if word_start < (drop_before - eps):
                         continue
 
                 new_words.append(word)
