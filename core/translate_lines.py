@@ -10,11 +10,17 @@ def valid_translate_result(result: dict, required_keys: list, required_sub_keys:
     # Check for the required key
     if not all(key in result for key in required_keys):
         return {"status": "error", "message": f"Missing required key(s): {', '.join(set(required_keys) - set(result.keys()))}"}
-    
+
     # Check for required sub-keys in all items
     for key in result:
         if not all(sub_key in result[key] for sub_key in required_sub_keys):
             return {"status": "error", "message": f"Missing required sub-key(s) in item {key}: {', '.join(set(required_sub_keys) - set(result[key].keys()))}"}
+
+        # Check for empty translations (critical validation)
+        for sub_key in required_sub_keys:
+            value = result[key].get(sub_key, '')
+            if not value or not str(value).strip():
+                return {"status": "error", "message": f"Empty translation in item {key}, field '{sub_key}'"}
 
     return {"status": "success", "message": "Translation completed"}
 

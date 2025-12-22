@@ -1,13 +1,15 @@
 import concurrent.futures
 from difflib import SequenceMatcher
 import math
+import pandas as pd
 from core.prompts import get_split_prompt
 from core.spacy_utils.load_nlp_model import init_nlp
 from core.spacy_utils.split_long_by_root import merge_short_segments
 from core.utils import *
+from core.utils.span_utils import map_sentences_to_spans
 from rich.console import Console
 from rich.table import Table
-from core.utils.models import _3_1_SPLIT_BY_NLP, _3_2_SPLIT_BY_MEANING
+from core.utils.models import _2_CLEANED_CHUNKS, _3_1_SPLIT_BY_NLP, _3_2_SPLIT_BY_MEANING, _3_2_SEGMENTS
 console = Console()
 
 def tokenize_sentence(sentence, nlp):
@@ -131,10 +133,33 @@ def split_sentences_by_meaning():
     if len(sentences) < original_count:
         console.print(f'[yellow]📝 Post-LLM merge: fixed {original_count - len(sentences)} problematic segments[/yellow]')
 
+    sentences = [s for s in sentences if s.strip()]
+
+    # Build word-index spans for each sentence
+    df_words = pd.read_excel(_2_CLEANED_CHUNKS)
+    df_words['text'] = df_words['text'].str.strip('"').str.strip()
+    word_list = df_words['text'].tolist()
+    spans = map_sentences_to_spans(sentences, word_list, joiner)
+
+    segments = []
+    for i, (sentence, (word_start_idx, word_end_idx)) in enumerate(zip(sentences, spans)):
+        segments.append({
+            "segment_id": f"seg_{i + 1:04d}",
+            "text": sentence,
+            "word_start_idx": word_start_idx,
+            "word_end_idx": word_end_idx,
+            "start": float(df_words.loc[word_start_idx, 'start']),
+            "end": float(df_words.loc[word_end_idx, 'end']),
+            "speaker_id": df_words.loc[word_start_idx, 'speaker_id'],
+        })
+
     # 💾 save results
     with open(_3_2_SPLIT_BY_MEANING, 'w', encoding='utf-8') as f:
         f.write('\n'.join(sentences))
     console.print('[green]✅ All sentences have been successfully split![/green]')
+
+    pd.DataFrame(segments).to_excel(_3_2_SEGMENTS, index=False)
+    console.print(f'[green]✅ Segments with spans saved to {_3_2_SEGMENTS}[/green]')
 
 if __name__ == '__main__':
     # print(split_sentence('Which makes no sense to the... average guy who always pushes the character creation slider all the way to the right.', 2, 22))

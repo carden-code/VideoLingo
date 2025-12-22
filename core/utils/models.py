@@ -5,6 +5,7 @@
 _2_CLEANED_CHUNKS = "output/log/cleaned_chunks.xlsx"
 _3_1_SPLIT_BY_NLP = "output/log/split_by_nlp.txt"
 _3_2_SPLIT_BY_MEANING = "output/log/split_by_meaning.txt"
+_3_2_SEGMENTS = "output/log/segments.xlsx"
 _4_1_TERMINOLOGY = "output/log/terminology.json"
 _4_2_TRANSLATION = "output/log/translation_results.xlsx"
 _5_SPLIT_SUB = "output/log/translation_results_for_subtitles.xlsx"
@@ -33,6 +34,7 @@ __all__ = [
     "_2_CLEANED_CHUNKS",
     "_3_1_SPLIT_BY_NLP",
     "_3_2_SPLIT_BY_MEANING",
+    "_3_2_SEGMENTS",
     "_4_1_TERMINOLOGY",
     "_4_2_TRANSLATION",
     "_5_SPLIT_SUB",

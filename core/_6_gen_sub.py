@@ -100,17 +100,36 @@ def get_sentence_timestamps(df_words, df_sentences):
     
     return time_stamp_list
 
+def get_sentence_timestamps_by_span(df_words, df_sentences):
+    time_stamp_list = []
+    for _, row in df_sentences.iterrows():
+        start_idx = row['word_start_idx']
+        end_idx = row['word_end_idx']
+        if pd.isna(start_idx) or pd.isna(end_idx):
+            raise ValueError("Missing word span for sentence.")
+        start_idx = int(start_idx)
+        end_idx = int(end_idx)
+        time_stamp_list.append((
+            float(df_words.loc[start_idx, 'start']),
+            float(df_words.loc[end_idx, 'end'])
+        ))
+    return time_stamp_list
+
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()
 
-    # Assign an ID to each word in df_text['text'] and create a new DataFrame
-    words = df_text['text'].str.split(expand=True).stack().reset_index(level=1, drop=True).reset_index()
-    words.columns = ['id', 'word']
-    words['id'] = words['id'].astype(int)
-
     # Process timestamps ⏰
-    time_stamp_list = get_sentence_timestamps(df_text, df_translate)
+    has_spans = (
+        'word_start_idx' in df_translate.columns
+        and 'word_end_idx' in df_translate.columns
+        and df_translate['word_start_idx'].notna().all()
+        and df_translate['word_end_idx'].notna().all()
+    )
+    if has_spans:
+        time_stamp_list = get_sentence_timestamps_by_span(df_text, df_translate)
+    else:
+        time_stamp_list = get_sentence_timestamps(df_text, df_translate)
     df_trans_time['timestamp'] = time_stamp_list
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
 

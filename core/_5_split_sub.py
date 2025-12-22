@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
 from core.utils import *
+from core.utils.span_utils import map_sentences_to_spans
 from core.utils.models import *
 console = Console()
 
@@ -121,9 +122,42 @@ def split_for_sub_main():
         remerged += [None] * (len(src) - len(remerged))
     elif len(remerged) > len(src):
         src += [None] * (len(remerged) - len(src))
-    
-    pd.DataFrame({'Source': split_src, 'Translation': split_trans}).to_excel(_5_SPLIT_SUB, index=False)
-    pd.DataFrame({'Source': src, 'Translation': remerged}).to_excel(_5_REMERGED, index=False)
+
+    whisper_language = load_key("whisper.language")
+    language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
+    joiner = get_joiner(language)
+
+    df_words = pd.read_excel(_2_CLEANED_CHUNKS)
+    df_words['text'] = df_words['text'].str.strip('"').str.strip()
+    word_list = df_words['text'].tolist()
+
+    def build_spans(sentences):
+        def is_empty(value):
+            return value is None or pd.isna(value) or not str(value).strip()
+
+        non_empty = [s for s in sentences if not is_empty(s)]
+        spans = map_sentences_to_spans(non_empty, word_list, joiner)
+        span_iter = iter(spans)
+        results = []
+        for sentence in sentences:
+            if not is_empty(sentence):
+                results.append(next(span_iter))
+            else:
+                results.append((None, None))
+        return results
+
+    split_spans = build_spans(split_src)
+    remerged_spans = build_spans(src)
+
+    df_split = pd.DataFrame({'Source': split_src, 'Translation': split_trans})
+    df_split['word_start_idx'] = [s[0] for s in split_spans]
+    df_split['word_end_idx'] = [s[1] for s in split_spans]
+    df_split.to_excel(_5_SPLIT_SUB, index=False)
+
+    df_remerged = pd.DataFrame({'Source': src, 'Translation': remerged})
+    df_remerged['word_start_idx'] = [s[0] for s in remerged_spans]
+    df_remerged['word_end_idx'] = [s[1] for s in remerged_spans]
+    df_remerged.to_excel(_5_REMERGED, index=False)
 
 if __name__ == '__main__':
     split_for_sub_main()
