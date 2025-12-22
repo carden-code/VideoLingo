@@ -142,7 +142,7 @@ def generate_shared_prompt(previous_content_prompt, after_content_prompt, summar
 ### Points to Note
 {things_to_note_prompt}'''
 
-def get_prompt_faithfulness(lines, shared_prompt, duration_info=None):
+def get_prompt_faithfulness(lines, shared_prompt, duration_info=None, anchor_constraints=None, strict=False):
     TARGET_LANGUAGE = load_key("target_language")
     # Split lines by \n
     line_splits = lines.split('\n')
@@ -157,12 +157,39 @@ def get_prompt_faithfulness(lines, shared_prompt, duration_info=None):
     # Duration awareness hint for video dubbing
     duration_hint = ""
     if duration_info:
+        line_hint = ""
+        if duration_info.get("line_durations"):
+            line_rows = []
+            line_chars = duration_info.get("line_chars", [])
+            for idx, dur in enumerate(duration_info["line_durations"], start=1):
+                if idx - 1 < len(line_chars):
+                    line_rows.append(f"{idx}. {dur:.2f}s ({line_chars[idx - 1]} chars)")
+                else:
+                    line_rows.append(f"{idx}. {dur:.2f}s")
+            line_hint = "\nPer-line target durations:\n" + "\n".join(line_rows)
         duration_hint = f"""
 <duration_awareness>
 ⏱️ IMPORTANT: These subtitles will be spoken as voiceover in {duration_info['total_duration']:.1f} seconds.
 The original {src_language} text has ~{duration_info['src_chars']} characters.
 Keep translation concise to fit the same time window. Avoid overly verbose translations.
+{line_hint}
 </duration_awareness>
+"""
+    anchor_hint = ""
+    if anchor_constraints:
+        anchor_hint = f"""
+<anchor_constraints>
+{anchor_constraints}
+</anchor_constraints>
+"""
+
+    strict_hint = ""
+    if strict:
+        strict_hint = """
+<strict_mode>
+Follow anchors exactly. Do not drop numbers or glossary terms.
+Do not merge or split lines. Keep the line count unchanged.
+</strict_mode>
 """
 
     prompt_faithfulness = f'''
@@ -179,6 +206,8 @@ We have a segment of original {src_language} subtitles that need to be directly 
 
 {shared_prompt}
 {duration_hint}
+{anchor_hint}
+{strict_hint}
 <translation_principles>
 1. Faithful to the original: Accurately convey the content and meaning of the original text, without arbitrarily changing, adding, or omitting content.
 2. Accurate terminology: Use professional terms correctly and maintain consistency in terminology.
@@ -200,7 +229,7 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
     return prompt_faithfulness.strip()
 
 
-def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duration_info=None):
+def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duration_info=None, anchor_constraints=None, strict=False):
     TARGET_LANGUAGE = load_key("target_language")
     json_format = {
         key: {
@@ -218,6 +247,16 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duratio
     # Duration awareness for video dubbing - critical for expressiveness step
     duration_hint = ""
     if duration_info:
+        line_hint = ""
+        if duration_info.get("line_durations"):
+            line_rows = []
+            line_chars = duration_info.get("line_chars", [])
+            for idx, dur in enumerate(duration_info["line_durations"], start=1):
+                if idx - 1 < len(line_chars):
+                    line_rows.append(f"{idx}. {dur:.2f}s ({line_chars[idx - 1]} chars)")
+                else:
+                    line_rows.append(f"{idx}. {dur:.2f}s")
+            line_hint = "\nPer-line target durations:\n" + "\n".join(line_rows)
         # Calculate verbosity guidance
         chars_per_sec = duration_info['src_chars'] / duration_info['total_duration'] if duration_info['total_duration'] > 0 else 15
         verbosity_hint = ""
@@ -234,7 +273,24 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duratio
 Original: ~{duration_info['src_chars']} characters ({chars_per_sec:.1f} chars/sec)
 {verbosity_hint}
 Prioritize conciseness over elaborate phrasing. Remove filler words and redundant expressions.
+{line_hint}
 </duration_awareness>
+"""
+    anchor_hint = ""
+    if anchor_constraints:
+        anchor_hint = f"""
+<anchor_constraints>
+{anchor_constraints}
+</anchor_constraints>
+"""
+
+    strict_hint = ""
+    if strict:
+        strict_hint = """
+<strict_mode>
+Keep all anchors exactly. Do not drop numbers or glossary terms.
+Do not merge or split lines. Keep the line count unchanged.
+</strict_mode>
 """
 
     prompt_expressiveness = f'''
@@ -254,6 +310,8 @@ Your task is to reflect on and improve these direct translations to create more 
 
 {shared_prompt}
 {duration_hint}
+{anchor_hint}
+{strict_hint}
 <Translation Analysis Steps>
 Please use a two-step thinking process to handle the text line by line:
 

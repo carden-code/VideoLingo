@@ -10,6 +10,7 @@ from core.utils import *
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from difflib import SequenceMatcher
+from core.utils.anchor_utils import load_terms
 from core.utils.models import *
 console = Console()
 
@@ -201,6 +202,18 @@ def estimate_chunk_duration(chunk_text):
     return None
 
 
+def build_duration_info_from_segments(segment_rows):
+    durations = (segment_rows['end'] - segment_rows['start']).fillna(0).tolist()
+    line_chars = segment_rows['text'].fillna("").astype(str).apply(len).tolist()
+    total_duration = sum(durations)
+    return {
+        'total_duration': total_duration,
+        'src_chars': sum(line_chars),
+        'line_durations': durations,
+        'line_chars': line_chars
+    }
+
+
 # Function to split text into chunks
 def split_chunks_by_chars(chunk_size, max_i, sentences=None):
     """Split text into chunks based on character count, return a list of multi-line text chunks"""
@@ -234,18 +247,20 @@ def get_after_content(chunks, chunk_index):
     return None if chunk_index == len(chunks) - 1 else chunks[chunk_index + 1].split('\n')[:2] # Get first 2 lines
 
 # 🔍 Translate a single chunk
-def translate_chunk(chunk, chunks, theme_prompt, i):
+def translate_chunk(chunk, chunks, theme_prompt, i, duration_info=None, terms=None):
     things_to_note_prompt = search_things_to_note_in_prompt(chunk)
     previous_content_prompt = get_previous_content(chunks, i)
     after_content_prompt = get_after_content(chunks, i)
 
     # Calculate duration info for duration-aware translation
-    duration_info = estimate_chunk_duration(chunk)
+    if duration_info is None:
+        duration_info = estimate_chunk_duration(chunk)
 
     translation, english_result = translate_lines(
         chunk, previous_content_prompt, after_content_prompt,
         things_to_note_prompt, theme_prompt, i,
-        duration_info=duration_info
+        duration_info=duration_info,
+        terms=terms
     )
     return i, english_result, translation
 
@@ -268,8 +283,20 @@ def translate_all():
     else:
         sentences = None
     chunks = split_chunks_by_chars(chunk_size=600, max_i=10, sentences=sentences)
+    terms = load_terms()
     with open(_4_1_TERMINOLOGY, 'r', encoding='utf-8') as file:
         theme_prompt = json.load(file).get('theme')
+
+    chunk_duration_infos = []
+    if segments_df is not None:
+        segment_cursor = 0
+        for chunk in chunks:
+            chunk_lines = chunk.split('\n')
+            chunk_seg = segments_df.iloc[segment_cursor:segment_cursor + len(chunk_lines)]
+            chunk_duration_infos.append(build_duration_info_from_segments(chunk_seg))
+            segment_cursor += len(chunk_lines)
+    else:
+        chunk_duration_infos = [None] * len(chunks)
 
     # 🔄 Use concurrent execution for translation
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), transient=True) as progress:
@@ -277,7 +304,11 @@ def translate_all():
         with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
             futures = []
             for i, chunk in enumerate(chunks):
-                future = executor.submit(translate_chunk, chunk, chunks, theme_prompt, i)
+                future = executor.submit(
+                    translate_chunk, chunk, chunks, theme_prompt, i,
+                    duration_info=chunk_duration_infos[i],
+                    terms=terms
+                )
                 futures.append(future)
             results = []
             for future in concurrent.futures.as_completed(futures):
