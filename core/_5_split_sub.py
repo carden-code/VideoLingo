@@ -132,12 +132,15 @@ def split_for_sub_main():
     word_list = df_words['text'].tolist()
 
     def build_spans(sentences):
-        non_empty = [s for s in sentences if str(s).strip()]
+        def is_empty(value):
+            return value is None or pd.isna(value) or not str(value).strip()
+
+        non_empty = [s for s in sentences if not is_empty(s)]
         spans = map_sentences_to_spans(non_empty, word_list, joiner)
         span_iter = iter(spans)
         results = []
         for sentence in sentences:
-            if str(sentence).strip():
+            if not is_empty(sentence):
                 results.append(next(span_iter))
             else:
                 results.append((None, None))
