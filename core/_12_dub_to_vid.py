@@ -27,11 +27,41 @@ TRANS_OUTLINE_COLOR = '&H000000'
 TRANS_OUTLINE_WIDTH = 1 
 TRANS_BACK_COLOR = '&H33000000'
 
+def load_ducking_config():
+    try:
+        return load_key("audio_ducking")
+    except Exception:
+        return {"enabled": False}
+
+def build_audio_filter(ducking_cfg):
+    if not ducking_cfg or not ducking_cfg.get("enabled", False):
+        return "[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=3[a]"
+
+    threshold = ducking_cfg.get("threshold", 0.02)
+    ratio = ducking_cfg.get("ratio", 4)
+    attack = ducking_cfg.get("attack", 50)
+    release = ducking_cfg.get("release", 300)
+    makeup = ducking_cfg.get("makeup", 1.0)
+    background_gain = ducking_cfg.get("background_gain", 1.0)
+
+    parts = []
+    if background_gain != 1.0:
+        parts.append(f"[1:a]volume={background_gain}[bg]")
+    else:
+        parts.append("[1:a]anull[bg]")
+    parts.append(
+        f"[bg][2:a]sidechaincompress=threshold={threshold}:ratio={ratio}:"
+        f"attack={attack}:release={release}:makeup={makeup}[bgduck]"
+    )
+    parts.append("[bgduck][2:a]amix=inputs=2:duration=first:dropout_transition=3[a]")
+    return ";".join(parts)
+
 def merge_video_audio():
     """Merge video and audio, optionally with burned-in subtitles"""
     VIDEO_FILE = find_video_files()
     background_file = _BACKGROUND_AUDIO_FILE
     burn_subs = load_key("burn_subtitles")
+    ducking_cfg = load_ducking_config()
 
     # Normalize dub audio
     normalized_dub_audio = 'output/normalized_dub.wav'
@@ -65,10 +95,11 @@ def merge_video_audio():
             f'pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2[v]'
         )
 
+    audio_filter = build_audio_filter(ducking_cfg)
     cmd = [
         'ffmpeg', '-y', '-i', VIDEO_FILE, '-i', background_file, '-i', normalized_dub_audio,
         '-filter_complex',
-        f'{video_filter};[1:a][2:a]amix=inputs=2:duration=first:dropout_transition=3[a]'
+        f'{video_filter};{audio_filter}'
     ]
 
     if load_key("ffmpeg_gpu"):
