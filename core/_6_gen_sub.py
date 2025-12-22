@@ -5,6 +5,7 @@ from rich.panel import Panel
 from rich.console import Console
 import autocorrect_py as autocorrect
 from core.utils import *
+from core.utils.vad_utils import detect_speech_segments, snap_to_vad_onset
 from core.utils.models import *
 console = Console()
 
@@ -115,6 +116,42 @@ def get_sentence_timestamps_by_span(df_words, df_sentences):
         ))
     return time_stamp_list
 
+def load_vad_config():
+    try:
+        return load_key("vad")
+    except Exception:
+        return {"enabled": False}
+
+def apply_vad_alignment(time_stamp_list):
+    vad_cfg = load_vad_config()
+    if not vad_cfg.get("enabled", False):
+        return time_stamp_list
+
+    audio_source = vad_cfg.get("audio_source", "vocal")
+    if audio_source == "vocal" and os.path.exists(_VOCAL_AUDIO_FILE):
+        audio_file = _VOCAL_AUDIO_FILE
+    else:
+        audio_file = _RAW_AUDIO_FILE
+
+    if not os.path.exists(audio_file):
+        return time_stamp_list
+
+    speech_segments = detect_speech_segments(
+        audio_file,
+        min_silence_len_ms=vad_cfg.get("min_silence_len_ms", 300),
+        silence_offset_db=vad_cfg.get("silence_offset_db", -16.0),
+        sample_ms=vad_cfg.get("sample_ms", 30000),
+        max_segments=vad_cfg.get("max_segments", 20000),
+        min_speech_ratio=vad_cfg.get("min_speech_ratio", 0.15),
+        max_speech_ratio=vad_cfg.get("max_speech_ratio", 0.98)
+    )
+    if not speech_segments:
+        rprint("[yellow]⚠️ VAD disabled: no reliable speech segments detected[/yellow]")
+        return time_stamp_list
+
+    max_shift_sec = vad_cfg.get("max_shift_ms", 250) / 1000.0
+    return snap_to_vad_onset(time_stamp_list, speech_segments, max_shift_sec=max_shift_sec)
+
 def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output_dir: str, for_display: bool = True):
     """Align timestamps and add a new timestamp column to df_translate"""
     df_trans_time = df_translate.copy()
@@ -130,6 +167,7 @@ def align_timestamp(df_text, df_translate, subtitle_output_configs: list, output
         time_stamp_list = get_sentence_timestamps_by_span(df_text, df_translate)
     else:
         time_stamp_list = get_sentence_timestamps(df_text, df_translate)
+    time_stamp_list = apply_vad_alignment(time_stamp_list)
     df_trans_time['timestamp'] = time_stamp_list
     df_trans_time['duration'] = df_trans_time['timestamp'].apply(lambda x: x[1] - x[0])
 

@@ -393,13 +393,29 @@ Note: Start you answer with ```json and end with ```, do not add any other text.
 
 ## ================================================================
 # @ step8_gen_audio_task.py @ step10_gen_audio.py
-def get_subtitle_trim_prompt(text, duration):
+def get_subtitle_trim_prompt(text, duration, anchor_constraints=None, strict=False):
  
     rule = '''Consider a. Reducing filler words without modifying meaningful content. b. Omitting unnecessary modifiers or pronouns, for example:
     - "Please explain your thought process" can be shortened to "Please explain thought process"
     - "We need to carefully analyze this complex problem" can be shortened to "We need to analyze this problem"
     - "Let's discuss the various different perspectives on this topic" can be shortened to "Let's discuss different perspectives on this topic"
     - "Can you describe in detail your experience from yesterday" can be shortened to "Can you describe yesterday's experience" '''
+
+    anchor_hint = ""
+    if anchor_constraints:
+        anchor_hint = f"""
+<anchor_constraints>
+{anchor_constraints}
+</anchor_constraints>
+"""
+
+    strict_hint = ""
+    if strict:
+        strict_hint = """
+<strict_mode>
+Do not drop numbers, acronyms, or required terms.
+</strict_mode>
+"""
 
     trim_prompt = f'''
 ## Role
@@ -411,6 +427,8 @@ Your expertise lies in cleverly shortening subtitles slightly while ensuring the
 Subtitle: "{text}"
 Duration: {duration} seconds
 </subtitles>
+{anchor_hint}
+{strict_hint}
 
 ## Processing Rules
 {rule}

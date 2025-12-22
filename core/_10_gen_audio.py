@@ -1,8 +1,10 @@
+import json
 import os
 import time
 import shutil
 import subprocess
 from typing import Tuple
+from threading import Lock
 
 import pandas as pd
 import requests
@@ -15,6 +17,14 @@ from core.utils import *
 from core.utils.models import *
 from core.asr_backend.audio_preprocess import get_audio_duration
 from core.tts_backend.tts_main import tts_main
+from core.tts_backend.estimate_duration import init_estimator, estimate_duration
+from core.prompts import get_subtitle_trim_prompt
+from core.utils.anchor_utils import (
+    load_terms,
+    build_anchor_requirements,
+    build_anchor_constraints,
+    validate_anchor_requirements
+)
 from core.utils.time_stretch import adjust_audio_speed, get_stretch_backend
 
 console = Console()
@@ -60,6 +70,92 @@ def free_vram_for_tts():
 TEMP_FILE_TEMPLATE = f"{_AUDIO_TMP_DIR}/{{}}_temp.wav"
 OUTPUT_FILE_TEMPLATE = f"{_AUDIO_SEGS_DIR}/{{}}.wav"
 WARMUP_SIZE = 5
+ESTIMATOR = None
+LOG_LOCK = Lock()
+DURATION_FIX_LOG = "output/log/duration_fixes.jsonl"
+
+
+def get_duration_estimator():
+    global ESTIMATOR
+    if ESTIMATOR is None:
+        ESTIMATOR = init_estimator()
+    return ESTIMATOR
+
+
+def log_duration_fix(payload: dict):
+    os.makedirs(os.path.dirname(DURATION_FIX_LOG), exist_ok=True)
+    with LOG_LOCK:
+        with open(DURATION_FIX_LOG, "a", encoding="utf-8") as file:
+            file.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def allocate_line_targets(lines, total_target):
+    if not lines:
+        return []
+    estimator = get_duration_estimator()
+    estimates = [estimate_duration(line, estimator) for line in lines]
+    total_est = sum(estimates)
+    if total_est <= 0:
+        return [total_target / len(lines)] * len(lines)
+    return [total_target * (est / total_est) for est in estimates]
+
+
+def shorten_line_with_anchors(line, src_line, target_duration, terms, strict=False):
+    anchors = build_anchor_requirements(src_line or "", terms)
+    constraints = build_anchor_constraints([src_line or ""], [anchors]) if anchors else ""
+    prompt = get_subtitle_trim_prompt(
+        line,
+        target_duration,
+        anchor_constraints=constraints,
+        strict=strict
+    )
+    response = ask_gpt(prompt, resp_type='json', log_title='duration_fix')
+    shortened = str(response.get('result', '')).strip()
+    if not shortened:
+        return None
+    if anchors:
+        missing = validate_anchor_requirements(shortened, anchors)
+        if missing:
+            return None
+    return shortened
+
+
+def split_text_simple(text, parts=2):
+    text = str(text).strip()
+    if parts <= 1 or not text:
+        return [text]
+    if parts != 2:
+        size = max(1, len(text) // parts)
+        return [text[i:i + size].strip() for i in range(0, len(text), size)]
+    punctuation = [',', '.', ';', ':', '!', '?', '，', '。', '；', '：', '！', '？']
+    mid = len(text) // 2
+    split_at = None
+    for i in range(mid, len(text)):
+        if text[i] in punctuation:
+            split_at = i + 1
+            break
+    if split_at is None:
+        for i in range(mid, -1, -1):
+            if text[i] in punctuation:
+                split_at = i + 1
+                break
+    if split_at is None and " " in text:
+        left = text[:mid].rfind(" ")
+        right = text[mid:].find(" ")
+        candidates = []
+        if left != -1:
+            candidates.append(left)
+        if right != -1:
+            candidates.append(mid + right)
+        if candidates:
+            split_at = min(candidates, key=lambda x: abs(x - mid))
+    if split_at is None:
+        split_at = mid
+    left_part = text[:split_at].strip()
+    right_part = text[split_at:].strip()
+    if not left_part or not right_part:
+        return [text]
+    return [left_part, right_part]
 
 def parse_df_srt_time(time_str: str) -> float:
     """Convert SRT time format to seconds"""
@@ -67,16 +163,99 @@ def parse_df_srt_time(time_str: str) -> float:
     seconds, milliseconds = seconds.split('.')
     return int(hours) * 3600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1000
 
-def process_row(row: pd.Series, tasks_df: pd.DataFrame) -> Tuple[int, float]:
+def process_row(row: pd.Series, tasks_df: pd.DataFrame, terms: list, max_speed: float) -> Tuple[int, float, list, list]:
     """Helper function for processing single row data"""
     number = row['number']
     lines = eval(row['lines']) if isinstance(row['lines'], str) else row['lines']
+    src_lines = eval(row['src_lines']) if isinstance(row.get('src_lines', []), str) else row.get('src_lines', [])
+    if not isinstance(src_lines, list):
+        src_lines = []
+    total_target = row.get('tol_dur', row.get('duration', 0))
+    line_targets = allocate_line_targets(lines, total_target) if total_target else []
+    out_lines = []
+    out_src_lines = []
     real_dur = 0
+    out_index = 0
     for line_index, line in enumerate(lines):
-        temp_file = TEMP_FILE_TEMPLATE.format(f"{number}_{line_index}")
+        src_line = src_lines[line_index] if line_index < len(src_lines) else ""
+        target_duration = line_targets[line_index] if line_index < len(line_targets) else total_target
+        temp_file = TEMP_FILE_TEMPLATE.format(f"{number}_{out_index}")
         tts_main(line, temp_file, number, tasks_df)
-        real_dur += get_audio_duration(temp_file)
-    return number, real_dur
+        duration = get_audio_duration(temp_file)
+
+        if target_duration and duration > target_duration * max_speed:
+            log_duration_fix({
+                "event": "overrun",
+                "number": number,
+                "line_index": line_index,
+                "target_duration": target_duration,
+                "duration": duration,
+                "text": line,
+                "source": src_line
+            })
+            shortened = shorten_line_with_anchors(line, src_line, target_duration, terms, strict=False)
+            if shortened is None:
+                shortened = shorten_line_with_anchors(line, src_line, target_duration, terms, strict=True)
+            if shortened and shortened != line:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                line = shortened
+                tts_main(line, temp_file, number, tasks_df)
+                duration = get_audio_duration(temp_file)
+                log_duration_fix({
+                    "event": "shorten_success",
+                    "number": number,
+                    "line_index": line_index,
+                    "target_duration": target_duration,
+                    "duration": duration,
+                    "text": line,
+                    "source": src_line
+                })
+            elif shortened is None:
+                log_duration_fix({
+                    "event": "shorten_failed",
+                    "number": number,
+                    "line_index": line_index,
+                    "target_duration": target_duration,
+                    "duration": duration,
+                    "text": line,
+                    "source": src_line
+                })
+
+        if target_duration and duration > target_duration * max_speed:
+            split_parts = split_text_simple(line, parts=2)
+            if len(split_parts) > 1:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                src_parts = split_text_simple(src_line, parts=len(split_parts))
+                if len(src_parts) != len(split_parts):
+                    src_parts = [src_line] * len(split_parts)
+                part_durations = []
+                for offset, part in enumerate(split_parts):
+                    part_file = TEMP_FILE_TEMPLATE.format(f"{number}_{out_index + offset}")
+                    tts_main(part, part_file, number, tasks_df)
+                    part_durations.append(get_audio_duration(part_file))
+                log_duration_fix({
+                    "event": "split_applied",
+                    "number": number,
+                    "line_index": line_index,
+                    "target_duration": target_duration,
+                    "durations": part_durations,
+                    "parts": split_parts,
+                    "source_parts": src_parts
+                })
+                out_lines.extend(split_parts)
+                out_src_lines.extend(src_parts)
+                real_dur += sum(part_durations)
+                out_index += len(split_parts)
+                continue
+
+        out_lines.append(line)
+        out_src_lines.append(src_line)
+        real_dur += duration
+        out_index += 1
+
+    return number, real_dur, out_lines, out_src_lines
 
 def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
     """Generate TTS audio sequentially and calculate actual duration"""
@@ -88,10 +267,16 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
         
         # warm up for first 5 rows
         warmup_size = min(WARMUP_SIZE, len(tasks_df))
+        terms = load_terms()
+        max_speed = load_key("speed_factor.max")
+
         for _, row in tasks_df.head(warmup_size).iterrows():
             try:
-                number, real_dur = process_row(row, tasks_df)
+                number, real_dur, out_lines, out_src_lines = process_row(row, tasks_df, terms, max_speed)
                 tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
+                tasks_df.loc[tasks_df['number'] == number, 'lines'] = [out_lines]
+                if 'src_lines' in tasks_df.columns:
+                    tasks_df.loc[tasks_df['number'] == number, 'src_lines'] = [out_src_lines]
                 progress.advance(task)
             except Exception as e:
                 rprint(f"[red]❌ Error in warmup: {str(e)}[/red]")
@@ -105,14 +290,17 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
             remaining_tasks = tasks_df.iloc[warmup_size:].copy()
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [
-                    executor.submit(process_row, row, tasks_df.copy())
+                    executor.submit(process_row, row, tasks_df.copy(), terms, max_speed)
                     for _, row in remaining_tasks.iterrows()
                 ]
                 
                 for future in as_completed(futures):
                     try:
-                        number, real_dur = future.result()
+                        number, real_dur, out_lines, out_src_lines = future.result()
                         tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
+                        tasks_df.loc[tasks_df['number'] == number, 'lines'] = [out_lines]
+                        if 'src_lines' in tasks_df.columns:
+                            tasks_df.loc[tasks_df['number'] == number, 'src_lines'] = [out_src_lines]
                         progress.advance(task)
                     except Exception as e:
                         rprint(f"[red]❌ Error: {str(e)}[/red]")
