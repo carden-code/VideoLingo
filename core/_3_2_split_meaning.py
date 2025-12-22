@@ -1,5 +1,6 @@
 import concurrent.futures
 from difflib import SequenceMatcher
+import json
 import math
 import pandas as pd
 from core.prompts import get_split_prompt
@@ -145,6 +146,7 @@ def split_sentences_by_meaning():
     for i, (sentence, (word_start_idx, word_end_idx)) in enumerate(zip(sentences, spans)):
         segments.append({
             "segment_id": f"seg_{i + 1:04d}",
+            "parent_segment_id": json.dumps([]),
             "text": sentence,
             "word_start_idx": word_start_idx,
             "word_end_idx": word_end_idx,

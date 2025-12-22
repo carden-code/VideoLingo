@@ -7,6 +7,7 @@ from rich.panel import Panel
 from core.prompts import get_subtitle_trim_prompt
 from core.tts_backend.estimate_duration import init_estimator, estimate_duration
 from core.utils import *
+from core.utils.segment_utils import encode_parent_list, parse_parent_list
 from core.utils.models import *
 from core.utils.prosodic_utils import (
     load_word_timestamps,
@@ -29,6 +30,28 @@ PROSODY_DF = None  # Cached prosodic data
 MIN_WORDS_FOR_TTS = 3
 # Maximum gap (seconds) to consider merging with neighbor
 MAX_MERGE_GAP = 3.0
+
+def normalize_segment_id(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value).strip()
+    return text if text else None
+
+def merge_segment_lineage(left_id, left_parent, right_id, right_parent):
+    parent_ids = []
+    for pid in parse_parent_list(left_parent) + parse_parent_list(right_parent):
+        if pid not in parent_ids:
+            parent_ids.append(pid)
+    for seg_id in (left_id, right_id):
+        if seg_id and seg_id not in parent_ids:
+            parent_ids.append(seg_id)
+    if not parent_ids:
+        return None, encode_parent_list([])
+    if len(parent_ids) == 1:
+        merged_segment_id = f"{parent_ids[0]}_m1"
+    else:
+        merged_segment_id = f"merge_{parent_ids[0]}_{parent_ids[-1]}"
+    return merged_segment_id, encode_parent_list(parent_ids)
 
 
 def load_prosody_data():
@@ -295,6 +318,17 @@ def merge_short_text_segments(df):
             word_count = count_words(df.loc[i, 'text'])
             rprint(f"[bold magenta]📝 Short text merge: '{df.loc[i, 'text']}' ({word_count} words) → merging with NEXT segment[/bold magenta]")
 
+            if 'segment_id' in df.columns:
+                merged_id, merged_parent = merge_segment_lineage(
+                    normalize_segment_id(df.loc[i, 'segment_id']),
+                    df.loc[i, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None,
+                    normalize_segment_id(df.loc[i + 1, 'segment_id']),
+                    df.loc[i + 1, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None
+                )
+                df.loc[i + 1, 'segment_id'] = merged_id
+                if 'parent_segment_id' in df.columns:
+                    df.loc[i + 1, 'parent_segment_id'] = merged_parent
+
             df.loc[i + 1, 'text'] = df.loc[i, 'text'] + ' ' + df.loc[i + 1, 'text']
             df.loc[i + 1, 'origin'] = df.loc[i, 'origin'] + ' ' + df.loc[i + 1, 'origin']
             df.loc[i + 1, 'start_time'] = df.loc[i, 'start_time']
@@ -311,6 +345,17 @@ def merge_short_text_segments(df):
             # Merge current with previous
             word_count = count_words(df.loc[i, 'text'])
             rprint(f"[bold magenta]📝 Short text merge: '{df.loc[i, 'text']}' ({word_count} words) → merging with PREV segment[/bold magenta]")
+
+            if 'segment_id' in df.columns:
+                merged_id, merged_parent = merge_segment_lineage(
+                    normalize_segment_id(df.loc[i - 1, 'segment_id']),
+                    df.loc[i - 1, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None,
+                    normalize_segment_id(df.loc[i, 'segment_id']),
+                    df.loc[i, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None
+                )
+                df.loc[i - 1, 'segment_id'] = merged_id
+                if 'parent_segment_id' in df.columns:
+                    df.loc[i - 1, 'parent_segment_id'] = merged_parent
 
             df.loc[i - 1, 'text'] = df.loc[i - 1, 'text'] + ' ' + df.loc[i, 'text']
             df.loc[i - 1, 'origin'] = df.loc[i - 1, 'origin'] + ' ' + df.loc[i, 'origin']
@@ -348,6 +393,25 @@ def process_srt():
 
     with open(SRC_SUBS_FOR_AUDIO_FILE, 'r', encoding='utf-8') as src_file:
         src_content = src_file.read()
+
+    segment_id_map = {}
+    parent_id_map = {}
+    if os.path.exists(_5_REMERGED):
+        df_remerged = pd.read_excel(_5_REMERGED)
+        if 'segment_id' in df_remerged.columns:
+            segment_id_map = {
+                i + 1: normalize_segment_id(v)
+                for i, v in enumerate(df_remerged['segment_id'].tolist())
+            }
+        if 'parent_segment_id' in df_remerged.columns:
+            parent_id_map = {}
+            for i, v in enumerate(df_remerged['parent_segment_id'].tolist()):
+                if v is None or (isinstance(v, float) and pd.isna(v)) or not str(v).strip():
+                    parent_id_map[i + 1] = encode_parent_list([])
+                elif isinstance(v, (list, tuple)):
+                    parent_id_map[i + 1] = encode_parent_list(v)
+                else:
+                    parent_id_map[i + 1] = str(v)
     
     subtitles = []
     src_subtitles = {}
@@ -386,7 +450,16 @@ def process_srt():
             rprint(Panel(f"Unable to parse subtitle block '{block}', error: {str(e)}, skipping this subtitle block.", title="Error", border_style="red"))
             continue
         
-        subtitles.append({'number': number, 'start_time': start_time, 'end_time': end_time, 'duration': duration, 'text': text, 'origin': origin})
+        subtitles.append({
+            'number': number,
+            'start_time': start_time,
+            'end_time': end_time,
+            'duration': duration,
+            'text': text,
+            'origin': origin,
+            'segment_id': segment_id_map.get(number),
+            'parent_segment_id': parent_id_map.get(number)
+        })
     
     df = pd.DataFrame(subtitles)
 
@@ -420,6 +493,16 @@ def process_srt():
                 else:
                     # No strong boundary - safe to merge
                     rprint(f"[bold yellow]Merging subtitles {i+1} and {i+2}[/bold yellow]")
+                    if 'segment_id' in df.columns:
+                        merged_id, merged_parent = merge_segment_lineage(
+                            normalize_segment_id(df.loc[i, 'segment_id']),
+                            df.loc[i, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None,
+                            normalize_segment_id(df.loc[i + 1, 'segment_id']),
+                            df.loc[i + 1, 'parent_segment_id'] if 'parent_segment_id' in df.columns else None
+                        )
+                        df.loc[i, 'segment_id'] = merged_id
+                        if 'parent_segment_id' in df.columns:
+                            df.loc[i, 'parent_segment_id'] = merged_parent
                     df.loc[i, 'text'] += ' ' + df.loc[i+1, 'text']
                     df.loc[i, 'origin'] += ' ' + df.loc[i+1, 'origin']
                     df.loc[i, 'end_time'] = df.loc[i+1, 'end_time']

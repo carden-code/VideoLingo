@@ -289,6 +289,7 @@ def translate_all():
     # 💾 Save results to lists and Excel file
     src_text, trans_text = [], []
     segment_ids = []
+    parent_segment_ids = []
     word_start_idxs = []
     word_end_idxs = []
     segment_cursor = 0
@@ -299,6 +300,8 @@ def translate_all():
         if segments_df is not None:
             chunk_seg = segments_df.iloc[segment_cursor:segment_cursor + len(chunk_lines)]
             segment_ids.extend(chunk_seg['segment_id'].tolist())
+            if 'parent_segment_id' in chunk_seg.columns:
+                parent_segment_ids.extend(chunk_seg['parent_segment_id'].tolist())
             if 'word_start_idx' in chunk_seg.columns:
                 word_start_idxs.extend(chunk_seg['word_start_idx'].tolist())
             if 'word_end_idx' in chunk_seg.columns:
@@ -345,6 +348,8 @@ def translate_all():
     df_translate = pd.DataFrame({'Source': src_text, 'Translation': trans_text})
     if segment_ids:
         df_translate.insert(0, 'segment_id', segment_ids)
+    if parent_segment_ids:
+        df_translate.insert(1, 'parent_segment_id', parent_segment_ids)
     if word_start_idxs:
         df_translate['word_start_idx'] = word_start_idxs
     if word_end_idxs:

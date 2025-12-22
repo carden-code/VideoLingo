@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
 from core.utils import *
+from core.utils.segment_utils import encode_parent_list, parse_parent_list
 from core.utils.span_utils import map_sentences_to_spans
 from core.utils.models import *
 console = Console()
@@ -59,11 +60,21 @@ def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], Lis
     
     return src_parts, tr_parts, tr_remerged
 
-def split_align_subs(src_lines: List[str], tr_lines: List[str]):
+def merge_parent_list(parent_ids, segment_id):
+    items = list(parent_ids) if parent_ids else []
+    if segment_id and segment_id not in items:
+        items.append(segment_id)
+    return tuple(items)
+
+def split_align_subs(src_lines: List[str], tr_lines: List[str], segment_ids: List[str], parent_segment_ids: List[tuple]):
     subtitle_set = load_key("subtitle")
     MAX_SUB_LENGTH = subtitle_set["max_length"]
     TARGET_SUB_MULTIPLIER = subtitle_set["target_multiplier"]
     remerged_tr_lines = tr_lines.copy()
+    remerged_segment_ids = segment_ids.copy()
+    remerged_parent_ids = parent_segment_ids.copy()
+    segment_id_lines = segment_ids.copy()
+    split_parent_lines = parent_segment_ids.copy()
     
     to_split = []
     for i, (src, tr) in enumerate(zip(src_lines, tr_lines)):
@@ -84,15 +95,25 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str]):
         src_lines[i] = src_parts
         tr_lines[i] = tr_parts
         remerged_tr_lines[i] = tr_remerged
+        parent_id = segment_id_lines[i] or f"seg_{i + 1:04d}"
+        part_ids = [f"{parent_id}_s{j + 1}" for j in range(len(src_parts))]
+        segment_id_lines[i] = part_ids
+        parent_for_parts = merge_parent_list(split_parent_lines[i], parent_id)
+        split_parent_lines[i] = [parent_for_parts] * len(src_parts)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
         executor.map(process, to_split)
     
+    def flatten(values):
+        return [item for sublist in values for item in (sublist if isinstance(sublist, list) else [sublist])]
+
     # Flatten `src_lines` and `tr_lines`
-    src_lines = [item for sublist in src_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
-    tr_lines = [item for sublist in tr_lines for item in (sublist if isinstance(sublist, list) else [sublist])]
+    src_lines = flatten(src_lines)
+    tr_lines = flatten(tr_lines)
+    split_segment_ids = flatten(segment_id_lines)
+    split_parent_ids = flatten(split_parent_lines)
     
-    return src_lines, tr_lines, remerged_tr_lines
+    return src_lines, tr_lines, remerged_tr_lines, split_segment_ids, split_parent_ids, remerged_segment_ids, remerged_parent_ids
 
 def split_for_sub_main():
     console.print("[bold green]🚀 Start splitting subtitles...[/bold green]")
@@ -100,6 +121,23 @@ def split_for_sub_main():
     df = pd.read_excel(_4_2_TRANSLATION)
     src = df['Source'].tolist()
     trans = df['Translation'].tolist()
+    if 'segment_id' in df.columns:
+        segment_ids = [
+            sid if pd.notna(sid) and str(sid).strip() else None
+            for sid in df['segment_id'].tolist()
+        ]
+    else:
+        segment_ids = [None] * len(df)
+    segment_ids = [
+        sid if sid is not None else f"seg_{i + 1:04d}"
+        for i, sid in enumerate(segment_ids)
+    ]
+    if 'parent_segment_id' in df.columns:
+        parent_segment_ids = [
+            tuple(parse_parent_list(pid)) for pid in df['parent_segment_id'].tolist()
+        ]
+    else:
+        parent_segment_ids = [()] * len(df)
     
     subtitle_set = load_key("subtitle")
     MAX_SUB_LENGTH = subtitle_set["max_length"]
@@ -107,7 +145,9 @@ def split_for_sub_main():
     
     for attempt in range(3):  # 多次切割
         console.print(Panel(f"🔄 Split attempt {attempt + 1}", expand=False))
-        split_src, split_trans, remerged = split_align_subs(src.copy(), trans)
+        split_src, split_trans, remerged, split_segment_ids, split_parent_ids, remerged_segment_ids, remerged_parent_ids = split_align_subs(
+            src.copy(), trans, segment_ids, parent_segment_ids
+        )
         
         # 检查是否所有字幕都符合长度要求
         if all(len(src) <= MAX_SUB_LENGTH for src in split_src) and \
@@ -116,12 +156,18 @@ def split_for_sub_main():
         
         # 更新源数据继续下一轮分割
         src, trans = split_src, split_trans
+        segment_ids = split_segment_ids
+        parent_segment_ids = split_parent_ids
 
     # 确保二者有相同的长度，防止报错
     if len(src) > len(remerged):
         remerged += [None] * (len(src) - len(remerged))
+        remerged_segment_ids += [None] * (len(src) - len(remerged_segment_ids))
+        remerged_parent_ids += [None] * (len(src) - len(remerged_parent_ids))
     elif len(remerged) > len(src):
         src += [None] * (len(remerged) - len(src))
+        segment_ids += [None] * (len(remerged) - len(segment_ids))
+        parent_segment_ids += [None] * (len(remerged) - len(parent_segment_ids))
 
     whisper_language = load_key("whisper.language")
     language = load_key("whisper.detected_language") if whisper_language == 'auto' else whisper_language
@@ -149,12 +195,22 @@ def split_for_sub_main():
     split_spans = build_spans(split_src)
     remerged_spans = build_spans(src)
 
-    df_split = pd.DataFrame({'Source': split_src, 'Translation': split_trans})
+    df_split = pd.DataFrame({
+        'segment_id': segment_ids,
+        'parent_segment_id': [encode_parent_list(p) for p in parent_segment_ids],
+        'Source': split_src,
+        'Translation': split_trans
+    })
     df_split['word_start_idx'] = [s[0] for s in split_spans]
     df_split['word_end_idx'] = [s[1] for s in split_spans]
     df_split.to_excel(_5_SPLIT_SUB, index=False)
 
-    df_remerged = pd.DataFrame({'Source': src, 'Translation': remerged})
+    df_remerged = pd.DataFrame({
+        'segment_id': remerged_segment_ids,
+        'parent_segment_id': [encode_parent_list(p) for p in remerged_parent_ids],
+        'Source': src,
+        'Translation': remerged
+    })
     df_remerged['word_start_idx'] = [s[0] for s in remerged_spans]
     df_remerged['word_end_idx'] = [s[1] for s in remerged_spans]
     df_remerged.to_excel(_5_REMERGED, index=False)
