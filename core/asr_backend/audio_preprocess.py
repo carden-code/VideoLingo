@@ -46,43 +46,120 @@ def get_audio_duration(audio_file: str) -> float:
         duration = 0
     return duration
 
-def split_audio(audio_file: str, target_len: float = 30*60, win: float = 60) -> List[Tuple[float, float]]:
-    ## 在 [target_len-win, target_len+win] 区间内用 pydub 检测静默，切分音频
-    rprint(f"[blue]🎙️ Starting audio segmentation {audio_file} {target_len} {win}[/blue]")
+def split_audio(audio_file: str, target_len: float = 30*60, win: float = 60,
+                overlap: float = 1.5) -> List[Tuple[float, float]]:
+    """
+    Split audio into chunks with overlap for protection against cut words at boundaries.
+
+    Args:
+        audio_file: Path to audio file
+        target_len: Target chunk length in seconds (default 30 min)
+        win: Window size for silence detection (default 60s)
+        overlap: Overlap between chunks in seconds (default 1.5s)
+
+    Returns:
+        List of (start, end) tuples with overlapping regions
+    """
+    rprint(f"[blue]🎙️ Starting audio segmentation {audio_file} target={target_len}s win={win}s overlap={overlap}s[/blue]")
     audio = AudioSegment.from_file(audio_file)
     duration = float(mediainfo(audio_file)["duration"])
     if duration <= target_len + win:
         return [(0, duration)]
     segments, pos = [], 0.0
-    safe_margin = 0.5  # 静默点前后安全边界，单位秒
+    safe_margin = 0.5  # Safety margin before/after silence points
 
     while pos < duration:
         if duration - pos <= target_len:
-            segments.append((pos, duration)); break
+            segments.append((pos, duration))
+            break
 
         threshold = pos + target_len
         ws, we = int((threshold - win) * 1000), int((threshold + win) * 1000)
-        
-        # 获取完整的静默区域
+
+        # Detect silence regions
         silence_regions = detect_silence(audio[ws:we], min_silence_len=int(safe_margin*1000), silence_thresh=-30)
         silence_regions = [(s/1000 + (threshold - win), e/1000 + (threshold - win)) for s, e in silence_regions]
-        # 筛选长度足够（至少1秒）且位置适合的静默区域
+
+        # Filter for valid silence regions (long enough and in the right position)
         valid_regions = [
-            (start, end) for start, end in silence_regions 
+            (start, end) for start, end in silence_regions
             if (end - start) >= (safe_margin * 2) and threshold <= start + safe_margin <= threshold + win
         ]
-        
+
         if valid_regions:
             start, end = valid_regions[0]
-            split_at = start + safe_margin  # 在静默区域起始点后0.5秒处切分
+            split_at = start + safe_margin
         else:
             rprint(f"[yellow]⚠️ No valid silence regions found for {audio_file} at {threshold}s, using threshold[/yellow]")
             split_at = threshold
-            
-        segments.append((pos, split_at)); pos = split_at
 
-    rprint(f"[green]🎙️ Audio split completed {len(segments)} segments[/green]")
+        # Add overlap to the end of current chunk (overlap with start of next)
+        chunk_end = min(split_at + overlap, duration)
+        segments.append((pos, chunk_end))
+
+        # Next chunk starts WITHOUT overlap (overlap is only at the end)
+        pos = split_at
+
+    rprint(f"[green]🎙️ Audio split: {len(segments)} segments with {overlap}s overlap[/green]")
     return segments
+
+
+def deduplicate_segments(all_results: List[Tuple[float, float, Dict]],
+                         segments: List[Tuple[float, float]],
+                         overlap: float = 1.5,
+                         tolerance: float = 0.05) -> Dict:
+    """
+    Deduplicate words at overlap-chunk boundaries.
+
+    Logic: if a word falls in the overlap zone AND already exists in the previous chunk
+    (by start/end time), skip it.
+
+    Args:
+        all_results: List of (chunk_start, chunk_end, transcription_result) tuples
+        segments: List of (start, end) tuples from split_audio
+        overlap: Overlap duration in seconds
+        tolerance: Time tolerance for word matching
+
+    Returns:
+        Combined transcription result with deduplicated words
+    """
+    combined = {'segments': []}
+    drop_before = None  # Skip words before this time (end of overlap)
+    eps = 1e-3
+
+    for i, (chunk_start, chunk_end, result) in enumerate(all_results):
+        if i > 0:
+            # Words in this chunk that start before drop_before should be skipped
+            # because they were already captured by the previous chunk
+            prev_end = segments[i - 1][1]
+            drop_before = max(chunk_start, prev_end - tolerance)
+
+        for segment in result.get('segments', []):
+            new_words = []
+            for word in segment.get('words', []):
+                word_start = word.get('start')
+
+                if word_start is None:
+                    word_start = segment.get('start')
+
+                # Skip words that were already covered by the previous chunk
+                if word_start is not None and drop_before is not None:
+                    if word_start < (drop_before - eps):
+                        continue
+
+                new_words.append(word)
+
+            if new_words:
+                new_segment = segment.copy()
+                new_segment['words'] = new_words
+                # Recalculate segment start/end
+                new_segment['start'] = new_words[0].get('start', segment['start'])
+                new_segment['end'] = new_words[-1].get('end', segment['end'])
+                combined['segments'].append(new_segment)
+
+    total_words = sum(len(s.get('words', [])) for s in combined['segments'])
+    rprint(f"[cyan]🔗 Deduplicated: {total_words} words from {len(all_results)} chunks[/cyan]")
+    return combined
 
 def process_transcription(result: Dict) -> pd.DataFrame:
     all_words = []
