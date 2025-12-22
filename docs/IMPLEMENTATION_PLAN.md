@@ -576,7 +576,9 @@ def flag_suspicious_segments(df: pd.DataFrame) -> pd.DataFrame:
 
 ---
 
-## P1.2 — Hard constraints для терминов
+## P1.2 — Hard constraints для терминов ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/26
 
 **Файл:** `core/_4_2_translate.py`
 
@@ -649,7 +651,9 @@ def translate_with_anchor_validation(chunk, terms, max_retries=3):
 
 ---
 
-## P1.3 — Эскалация retry перевода
+## P1.3 — Эскалация retry перевода ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/26
 
 **Файл:** `core/translate_lines.py`
 
@@ -701,7 +705,9 @@ def retry_translation_with_escalation(prompt_fn, lines, step_name, max_retries=3
 
 ---
 
-## P1.4 — Пер-сегментное ограничение длительности перевода
+## P1.4 — Пер-сегментное ограничение длительности перевода ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/26
 
 ### Проблема
 Сейчас duration-aware подсказки применяются на уровне чанка, но не каждого сегмента.
