@@ -1,8 +1,14 @@
 from core.utils import *
 from core.asr_backend.demucs_vl import demucs_audio
-from core.asr_backend.audio_preprocess import process_transcription, convert_video_to_audio, split_audio, save_results, normalize_audio_volume
+from core.asr_backend.audio_preprocess import (
+    process_transcription, convert_video_to_audio, split_audio,
+    save_results, normalize_audio_volume, deduplicate_segments
+)
 from core._1_ytdlp import find_video_files
 from core.utils.models import *
+
+# Overlap duration for chunk boundaries (in seconds)
+CHUNK_OVERLAP = 1.5
 
 @check_file_exists(_2_CLEANED_CHUNKS)
 def transcribe():
@@ -17,8 +23,8 @@ def transcribe():
     else:
         vocal_audio = _RAW_AUDIO_FILE
 
-    # 3. Extract audio
-    segments = split_audio(_RAW_AUDIO_FILE)
+    # 3. Split audio with overlap for better word boundary handling
+    segments = split_audio(_RAW_AUDIO_FILE, overlap=CHUNK_OVERLAP)
 
     # 4. Transcribe audio with local WhisperX
     # Note: Only local runtime is supported in this optimized version
@@ -32,12 +38,10 @@ def transcribe():
     all_results = []
     for start, end in segments:
         result = ts(_RAW_AUDIO_FILE, vocal_audio, start, end)
-        all_results.append(result)
+        all_results.append((start, end, result))
 
-    # 5. Combine results
-    combined_result = {'segments': []}
-    for result in all_results:
-        combined_result['segments'].extend(result['segments'])
+    # 5. Combine results with deduplication at chunk boundaries
+    combined_result = deduplicate_segments(all_results, segments, overlap=CHUNK_OVERLAP)
 
     # 6. Process df
     df = process_transcription(combined_result)
