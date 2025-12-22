@@ -416,7 +416,9 @@ def align_timestamp_v2(df_translate: pd.DataFrame, output_dir: str):
 
 ---
 
-## P0.3 — Стабильный segment_id через весь пайплайн
+## P0.3 — Стабильный segment_id через весь пайплайн ✅ DONE
+
+> **PR:** https://github.com/carden-code/VideoLingo/pull/24
 
 ### Изменения в форматах файлов
 
