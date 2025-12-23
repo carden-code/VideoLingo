@@ -44,19 +44,27 @@ def text_processing_section():
 
 def process_text():
     with st.spinner(t("Using Whisper for transcription...")):
+        print("[STEP] Starting Whisper transcription...")
         _2_asr.transcribe()
-    with st.spinner(t("Splitting long sentences...")):  
+    with st.spinner(t("Splitting long sentences...")):
+        print("[STEP] Starting NLP split...")
         _3_1_split_nlp.split_by_spacy()
+        print("[STEP] Starting meaning-based split...")
         _3_2_split_meaning.split_sentences_by_meaning()
     with st.spinner(t("Summarizing and translating...")):
+        print("[STEP] Starting summarization...")
         _4_1_summarize.get_summary()
         if load_key("pause_before_translate"):
             input(t("⚠️ PAUSE_BEFORE_TRANSLATE. Go to `output/log/terminology.json` to edit terminology. Then press ENTER to continue..."))
+        print("[STEP] Starting translation...")
         _4_2_translate.translate_all()
-    with st.spinner(t("Processing and aligning subtitles...")): 
+    with st.spinner(t("Processing and aligning subtitles...")):
+        print("[STEP] Starting subtitle split...")
         _5_split_sub.split_for_sub_main()
+        print("[STEP] Starting timestamp alignment...")
         _6_gen_sub.align_timestamp_main()
     with st.spinner(t("Merging subtitles to video...")):
+        print("[STEP] Merging subtitles to video...")
         _7_sub_into_vid.merge_subtitles_to_video()
     
     st.success(t("Subtitle processing complete! 🎉"))

@@ -132,8 +132,11 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], segment_ids: Lis
     
     @except_handler("Error in split_align_subs", retry=2)
     def process(i):
+        console.print(f"[dim]🔧 Processing line {i}...[/dim]")
         split_src = split_sentence(src_lines[i], num_parts=2).strip()
+        console.print(f"[dim]🔧 Line {i}: split done, aligning...[/dim]")
         src_parts, tr_parts, tr_remerged = align_subs(src_lines[i], tr_lines[i], split_src)
+        console.print(f"[dim]🔧 Line {i}: align done[/dim]")
         src_lines[i] = src_parts
         tr_lines[i] = tr_parts
         remerged_tr_lines[i] = tr_remerged
@@ -143,8 +146,10 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], segment_ids: Lis
         parent_for_parts = merge_parent_list(split_parent_lines[i], parent_id)
         split_parent_lines[i] = [parent_for_parts] * len(src_parts)
     
+    console.print(f"[cyan]🔄 Starting {len(to_split)} split tasks (max_workers={load_key('max_workers')})...[/cyan]")
     with concurrent.futures.ThreadPoolExecutor(max_workers=load_key("max_workers")) as executor:
-        executor.map(process, to_split)
+        list(executor.map(process, to_split))  # list() forces completion
+    console.print(f"[green]✅ All {len(to_split)} split tasks completed[/green]")
     
     def flatten(values):
         return [item for sublist in values for item in (sublist if isinstance(sublist, list) else [sublist])]
