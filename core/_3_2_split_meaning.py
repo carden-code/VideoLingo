@@ -17,6 +17,32 @@ def tokenize_sentence(sentence, nlp):
     doc = nlp(sentence)
     return [token.text for token in doc]
 
+def snap_to_word_boundary(text, pos):
+    """Snap position to nearest word boundary (prefer earlier boundary)."""
+    if pos <= 0:
+        return 0
+    if pos >= len(text):
+        return len(text)
+
+    # If already at a word boundary (space or after space), return as is
+    if text[pos] == ' ' or (pos > 0 and text[pos - 1] == ' '):
+        return pos
+
+    # Search backwards for space (prefer splitting before current word)
+    for i in range(pos, -1, -1):
+        if i > 0 and text[i - 1] == ' ':
+            return i
+        if text[i] == ' ':
+            return i + 1
+
+    # Search forwards for space if no backward boundary found
+    for i in range(pos, len(text)):
+        if text[i] == ' ':
+            return i + 1
+
+    return pos
+
+
 def find_split_positions(original, modified):
     split_positions = []
     parts = modified.split('[br]')
@@ -42,6 +68,8 @@ def find_split_positions(original, modified):
         if max_similarity < 0.9:
             console.print(f"[yellow]Warning: low similarity found at the best split point: {max_similarity}[/yellow]")
         if best_split is not None:
+            # Snap to word boundary to avoid splitting in the middle of a word
+            best_split = snap_to_word_boundary(original, best_split)
             split_positions.append(best_split)
             start = best_split
         else:

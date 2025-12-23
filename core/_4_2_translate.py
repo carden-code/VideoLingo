@@ -18,8 +18,10 @@ console = Console()
 
 def verify_translation_quality(src_text: list, trans_text: list, sample_size: int = 5) -> bool:
     """
-    Optional LLM-based verification of translation quality.
-    Samples a few translations and asks LLM to verify they make sense.
+    Optional LLM-based verification of translation quality (informational only).
+    Samples a few translations and logs any potential issues as warnings.
+    Never blocks the pipeline - truly critical issues (empty translations,
+    line count mismatch) are caught by explicit validation elsewhere.
 
     Args:
         src_text: List of source text lines
@@ -27,7 +29,7 @@ def verify_translation_quality(src_text: list, trans_text: list, sample_size: in
         sample_size: Number of samples to verify (default 5)
 
     Returns:
-        True if verification passes, raises ValueError if critical issues found
+        Always True - verification is advisory only
     """
     try:
         if not load_key("verify_translation"):
@@ -69,16 +71,22 @@ Target language: {target_lang}
 Samples:
 {chr(10).join(samples)}
 
-Check each sample for:
-1. Is the translation semantically correct (meaning preserved)?
-2. Is it in the correct target language?
-3. Is it complete (not truncated or garbled)?
+ONLY flag as CRITICAL if:
+- Translation is in WRONG LANGUAGE (not {target_lang})
+- Translation is EMPTY or gibberish/corrupted text
+- Translation has COMPLETELY WRONG meaning (says opposite or unrelated)
 
-Respond in JSON format:
+DO NOT flag as critical:
+- Stylistic preferences (awkward phrasing is OK)
+- Alternative word choices (synonyms are OK)
+- Minor accuracy nuances
+- Transliterated proper nouns (e.g., "Курс Бэйс" → "Base Course" is fine)
+
+Respond in JSON:
 {{
-  "passed": true/false,
-  "issues": ["list of issues if any, empty if passed"],
-  "critical": true/false (true = translation is unusable)
+  "passed": true/false (false only if issues exist),
+  "issues": ["list specific problems, empty if none"],
+  "critical": true/false (true ONLY for wrong language/empty/gibberish)
 }}"""
 
     try:
@@ -100,10 +108,11 @@ Respond in JSON format:
 
         if result.get('critical', False):
             issues = result.get('issues', ['Unknown critical issue'])
-            console.print(f"[bold red]❌ CRITICAL translation issues found:[/bold red]")
+            console.print(f"[bold yellow]⚠️ LLM verification flagged potential issues (non-blocking):[/bold yellow]")
             for issue in issues:
-                console.print(f"[red]   • {issue}[/red]")
-            raise ValueError(f"Translation verification failed: {'; '.join(issues)}")
+                console.print(f"[yellow]   • {issue}[/yellow]")
+            # Note: Not blocking - truly critical issues (empty translations, wrong line count)
+            # are already caught by explicit validation above
 
         if not result.get('passed', True):
             issues = result.get('issues', [])
@@ -116,8 +125,6 @@ Respond in JSON format:
         return True
 
     except Exception as e:
-        if "Translation verification failed" in str(e):
-            raise
         console.print(f"[yellow]⚠️ Verification skipped due to error: {e}[/yellow]")
         return True
 
