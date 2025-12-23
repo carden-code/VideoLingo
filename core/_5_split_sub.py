@@ -238,8 +238,8 @@ def split_for_sub_main():
     remerged_spans = build_spans(src)
 
     df_split = pd.DataFrame({
-        'segment_id': segment_ids,
-        'parent_segment_id': [encode_parent_list(p) for p in parent_segment_ids],
+        'segment_id': split_segment_ids,
+        'parent_segment_id': [encode_parent_list(p) for p in split_parent_ids],
         'Source': split_src,
         'Translation': split_trans
     })
