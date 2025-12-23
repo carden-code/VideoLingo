@@ -336,7 +336,10 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     # Generate dynamic speed instruction for instruct2_auto mode
     if MODE == "instruct2_auto":
         # Map target_language name to language code
-        target_lang_name = load_key("target_language", "English").lower()
+        try:
+            target_lang_name = load_key("target_language").lower()
+        except KeyError:
+            target_lang_name = "english"
         lang_name_to_code = {
             'english': 'en', 'русский': 'ru', 'russian': 'ru',
             'chinese': 'zh', '中文': 'zh', 'japanese': 'ja', '日本語': 'ja',

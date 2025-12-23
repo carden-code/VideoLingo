@@ -57,7 +57,10 @@ def verify_translation_quality(src_text: list, trans_text: list, sample_size: in
         console.print("[yellow]⚠️ No samples to verify[/yellow]")
         return True
 
-    target_lang = load_key("target_language", "English")
+    try:
+        target_lang = load_key("target_language")
+    except KeyError:
+        target_lang = "English"
     prompt = f"""You are a translation quality checker. Verify these {len(samples)} translation samples.
 
 Target language: {target_lang}
