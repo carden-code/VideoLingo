@@ -142,6 +142,28 @@ def generate_shared_prompt(previous_content_prompt, after_content_prompt, summar
 ### Points to Note
 {things_to_note_prompt}'''
 
+def build_target_length_hint(duration_info, target_language):
+    if not duration_info or not duration_info.get("target_chars"):
+        return ""
+
+    target_rows = []
+    target_line_chars = duration_info.get("line_target_chars")
+    if target_line_chars:
+        for idx, chars in enumerate(target_line_chars, start=1):
+            target_rows.append(f"{idx}. ~{chars:.0f} chars")
+
+    target_ratio = duration_info.get("target_char_ratio")
+    target_cps = duration_info.get("target_chars_per_sec")
+    ratio_hint = f" (~{target_ratio:.2f}x of source length)" if target_ratio else ""
+    cps_hint = f" (~{target_cps:.1f} chars/sec)" if target_cps else ""
+    hint = (
+        f"\nTarget {target_language} length budget: "
+        f"~{duration_info['target_chars']:.0f} chars{cps_hint}{ratio_hint}."
+    )
+    if target_rows:
+        hint += "\nPer-line target lengths:\n" + "\n".join(target_rows)
+    return hint
+
 def get_prompt_faithfulness(lines, shared_prompt, duration_info=None, anchor_constraints=None, strict=False):
     TARGET_LANGUAGE = load_key("target_language")
     # Split lines by \n
@@ -167,12 +189,16 @@ def get_prompt_faithfulness(lines, shared_prompt, duration_info=None, anchor_con
                 else:
                     line_rows.append(f"{idx}. {dur:.2f}s")
             line_hint = "\nPer-line target durations:\n" + "\n".join(line_rows)
+
+        target_hint = build_target_length_hint(duration_info, TARGET_LANGUAGE)
+
         duration_hint = f"""
 <duration_awareness>
 ⏱️ IMPORTANT: These subtitles will be spoken as voiceover in {duration_info['total_duration']:.1f} seconds.
 The original {src_language} text has ~{duration_info['src_chars']} characters.
 Keep translation concise to fit the same time window. Avoid overly verbose translations.
 {line_hint}
+{target_hint}
 </duration_awareness>
 """
     anchor_hint = ""
@@ -258,7 +284,9 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duratio
                     line_rows.append(f"{idx}. {dur:.2f}s")
             line_hint = "\nPer-line target durations:\n" + "\n".join(line_rows)
         # Calculate verbosity guidance
-        chars_per_sec = duration_info['src_chars'] / duration_info['total_duration'] if duration_info['total_duration'] > 0 else 15
+        chars_per_sec = duration_info.get("src_chars_per_sec")
+        if not chars_per_sec:
+            chars_per_sec = duration_info['src_chars'] / duration_info['total_duration'] if duration_info['total_duration'] > 0 else 15
         verbosity_hint = ""
         if chars_per_sec > 18:
             verbosity_hint = "The speaker talks FAST. Keep translations SHORT and punchy."
@@ -267,6 +295,8 @@ def get_prompt_expressiveness(faithfulness_result, lines, shared_prompt, duratio
         else:
             verbosity_hint = "The speaker talks slowly. You have room for natural phrasing."
 
+        target_hint = build_target_length_hint(duration_info, TARGET_LANGUAGE)
+
         duration_hint = f"""
 <duration_awareness>
 ⏱️ VIDEO DUBBING CONSTRAINT: These subtitles will be spoken in {duration_info['total_duration']:.1f} seconds.
@@ -274,6 +304,7 @@ Original: ~{duration_info['src_chars']} characters ({chars_per_sec:.1f} chars/se
 {verbosity_hint}
 Prioritize conciseness over elaborate phrasing. Remove filler words and redundant expressions.
 {line_hint}
+{target_hint}
 </duration_awareness>
 """
     anchor_hint = ""

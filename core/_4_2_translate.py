@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from difflib import SequenceMatcher
 from core.utils.anchor_utils import load_terms
+from core.utils.duration_utils import get_chars_per_sec, normalize_language_code, get_duration_aware_config
 from core.utils.models import *
 console = Console()
 
@@ -178,14 +179,17 @@ def estimate_chunk_duration(chunk_text):
     sentences = chunk_text.strip().split('\n')
     total_duration = 0
     total_chars = 0
+    line_chars = []
     matched = 0
 
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
+            line_chars.append(0)
             continue
 
         normalized = ''.join(sentence.lower().split())
+        line_chars.append(len(sentence))
         total_chars += len(sentence)
 
         # Try exact match first
@@ -205,17 +209,42 @@ def estimate_chunk_duration(chunk_text):
     # If less than half matched, use character-based estimation
     # Average speaking rate: ~15 chars/sec for most languages
     if matched < len(sentences) / 2:
-        estimated_duration = total_chars / 15.0
+        try:
+            src_lang = load_key("whisper.detected_language")
+        except KeyError:
+            src_lang = None
+        if not src_lang or src_lang == "auto":
+            try:
+                src_lang = load_key("whisper.language")
+            except KeyError:
+                src_lang = "en"
+        src_lang_code = normalize_language_code(src_lang)
+        chars_per_sec = get_chars_per_sec(src_lang_code, get_duration_aware_config())
+        estimated_duration = total_chars / chars_per_sec if chars_per_sec else total_chars / 15.0
+        line_durations = []
+        if total_chars:
+            line_durations = [estimated_duration * (chars / total_chars) for chars in line_chars]
+        else:
+            line_durations = [0.0 for _ in line_chars]
         return {
             'total_duration': estimated_duration,
             'src_chars': total_chars,
+            'line_durations': line_durations,
+            'line_chars': line_chars,
             'estimated': True
         }
 
     if total_duration > 0:
+        line_durations = []
+        if total_chars:
+            line_durations = [total_duration * (chars / total_chars) for chars in line_chars]
+        else:
+            line_durations = [0.0 for _ in line_chars]
         return {
             'total_duration': total_duration,
             'src_chars': total_chars,
+            'line_durations': line_durations,
+            'line_chars': line_chars,
             'estimated': False
         }
 
