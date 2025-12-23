@@ -34,16 +34,58 @@ def calc_len(text: str) -> float:
 
 def align_subs(src_sub: str, tr_sub: str, src_part: str) -> Tuple[List[str], List[str], str]:
     align_prompt = get_align_prompt(src_sub, tr_sub, src_part)
-    
+    src_parts = src_part.split('\n')
+    num_parts = len(src_parts)
     def valid_align(response_data):
         if 'align' not in response_data:
             return {"status": "error", "message": "Missing required key: `align`"}
-        if len(response_data['align']) < 2:
-            return {"status": "error", "message": "Align does not contain more than 1 part as expected!"}
+        if 'analysis' not in response_data:
+            return {"status": "error", "message": "Missing required key: `analysis`"}
+        if len(response_data['align']) != num_parts:
+            return {"status": "error", "message": f"Align parts mismatch: expected {num_parts}, got {len(response_data['align'])}"}
+        for idx, item in enumerate(response_data['align']):
+            src_key = f"src_part_{idx + 1}"
+            tgt_key = f"target_part_{idx + 1}"
+            missing = [key for key in (src_key, tgt_key) if key not in item]
+            if missing:
+                return {"status": "error", "message": f"Missing required key(s) in align item {idx + 1}: {missing}"}
         return {"status": "success", "message": "Align completed"}
-    parsed = ask_gpt(align_prompt, resp_type='json', valid_def=valid_align, log_title='align_subs')
+    align_item_props = {
+        "^src_part_\\d+$": {"type": "string"},
+        "^target_part_\\d+$": {"type": "string"}
+    }
+    schema = {
+        "name": "align_subs",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "analysis": {"type": "string"},
+                "align": {
+                    "type": "array",
+                    "minItems": num_parts,
+                    "maxItems": num_parts,
+                    "items": {
+                        "type": "object",
+                        "patternProperties": align_item_props,
+                        "minProperties": 2,
+                        "maxProperties": 2,
+                        "additionalProperties": False
+                    }
+                }
+            },
+            "required": ["analysis", "align"],
+            "additionalProperties": False
+        }
+    }
+    parsed = ask_gpt(
+        align_prompt,
+        resp_type='json',
+        valid_def=valid_align,
+        log_title='align_subs',
+        json_schema=schema
+    )
     align_data = parsed['align']
-    src_parts = src_part.split('\n')
     tr_parts = [item[f'target_part_{i+1}'].strip() for i, item in enumerate(align_data)]
     
     whisper_language = load_key("whisper.language")
@@ -88,7 +130,7 @@ def split_align_subs(src_lines: List[str], tr_lines: List[str], segment_ids: Lis
             table.add_row("Target Line", tr)
             console.print(table)
     
-    @except_handler("Error in split_align_subs")
+    @except_handler("Error in split_align_subs", retry=2)
     def process(i):
         split_src = split_sentence(src_lines[i], num_parts=2).strip()
         src_parts, tr_parts, tr_remerged = align_subs(src_lines[i], tr_lines[i], split_src)

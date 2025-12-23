@@ -109,7 +109,21 @@ def shorten_line_with_anchors(line, src_line, target_duration, terms, strict=Fal
         anchor_constraints=constraints,
         strict=strict
     )
-    response = ask_gpt(prompt, resp_type='json', log_title='duration_fix')
+    # JSON schema for structured output
+    trim_schema = {
+        "name": "subtitle_trim",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "analysis": {"type": "string"},
+                "result": {"type": "string"}
+            },
+            "required": ["analysis", "result"],
+            "additionalProperties": False
+        }
+    }
+    response = ask_gpt(prompt, resp_type='json', log_title='duration_fix', json_schema=trim_schema)
     shortened = str(response.get('result', '')).strip()
     if not shortened:
         return None

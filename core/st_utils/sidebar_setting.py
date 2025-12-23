@@ -219,8 +219,25 @@ def page_setting():
 
 def check_api():
     try:
-        resp = ask_gpt("This is a test, response 'message':'success' in json format.",
-                      resp_type="json", log_title='None')
+        # JSON schema for structured output
+        check_schema = {
+            "name": "api_check",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"}
+                },
+                "required": ["message"],
+                "additionalProperties": False
+            }
+        }
+        resp = ask_gpt(
+            "This is a test. Respond with JSON: {\"message\": \"success\"}",
+            resp_type="json",
+            log_title='api_check',
+            json_schema=check_schema
+        )
         return resp.get('message') == 'success'
     except Exception:
         return False

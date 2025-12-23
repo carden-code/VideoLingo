@@ -179,12 +179,26 @@ def check_len_then_trim(text, duration):
         rprint(Panel(f"Estimated reading duration {estimated_duration:.2f} seconds exceeds given duration {duration:.2f} seconds, shortening...", title="Processing", border_style="yellow"))
         original_text = text
         prompt = get_subtitle_trim_prompt(text, duration)
+        # JSON schema for structured output
+        trim_schema = {
+            "name": "subtitle_trim",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "analysis": {"type": "string"},
+                    "result": {"type": "string"}
+                },
+                "required": ["analysis", "result"],
+                "additionalProperties": False
+            }
+        }
         def valid_trim(response):
             if 'result' not in response:
                 return {'status': 'error', 'message': 'No result in response'}
             return {'status': 'success', 'message': ''}
-        try:    
-            response = ask_gpt(prompt, resp_type='json', log_title='sub_trim', valid_def=valid_trim)
+        try:
+            response = ask_gpt(prompt, resp_type='json', log_title='sub_trim', valid_def=valid_trim, json_schema=trim_schema)
             shortened_text = response['result']
         except Exception:
             rprint("[bold red]🚫 AI refused to answer due to sensitivity, so manually remove punctuation[/bold red]")

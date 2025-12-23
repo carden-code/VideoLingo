@@ -50,16 +50,43 @@ def get_summary():
     summary_prompt = get_summary_prompt(src_content, custom_terms_json)
     rprint("📝 Summarizing and extracting terminology ...")
     
+    # JSON schema for structured output
+    summary_schema = {
+        "name": "terminology_extraction",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "theme": {"type": "string"},
+                "terms": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "src": {"type": "string"},
+                            "tgt": {"type": "string"},
+                            "note": {"type": "string"}
+                        },
+                        "required": ["src", "tgt", "note"],
+                        "additionalProperties": False
+                    }
+                }
+            },
+            "required": ["theme", "terms"],
+            "additionalProperties": False
+        }
+    }
+
     def valid_summary(response_data):
         required_keys = {'src', 'tgt', 'note'}
         if 'terms' not in response_data:
             return {"status": "error", "message": "Invalid response format"}
         for term in response_data['terms']:
             if not all(key in term for key in required_keys):
-                return {"status": "error", "message": "Invalid response format"}   
+                return {"status": "error", "message": "Invalid response format"}
         return {"status": "success", "message": "Summary completed"}
 
-    summary = ask_gpt(summary_prompt, resp_type='json', valid_def=valid_summary, log_title='summary')
+    summary = ask_gpt(summary_prompt, resp_type='json', valid_def=valid_summary, log_title='summary', json_schema=summary_schema)
     summary['terms'].extend(custom_terms_json['terms'])
     
     with open(_4_1_TERMINOLOGY, 'w', encoding='utf-8') as f:
