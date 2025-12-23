@@ -4,6 +4,7 @@ Reference Audio Enhancement Utilities for VideoLingo
 Provides functions to select and enhance reference audio for TTS voice cloning:
 - SNR (Signal-to-Noise Ratio) analysis for quality assessment
 - Smart segment selection based on duration and quality
+- Optional stitching of multiple short references to reach minimum length
 - Noise reduction for cleaner reference audio
 - Audio normalization
 
@@ -11,6 +12,7 @@ Optimal reference audio for voice cloning: 10-30 seconds, clean voice
 """
 
 import os
+import hashlib
 import numpy as np
 from pathlib import Path
 from typing import Optional, List, Tuple
@@ -22,6 +24,8 @@ import soundfile as sf
 DEFAULT_MIN_DURATION = 10.0  # seconds - minimum for good voice cloning
 DEFAULT_MAX_DURATION = 30.0  # seconds - practical upper limit
 DEFAULT_FALLBACK_MIN = 5.0   # seconds - fallback if no long segments
+DEFAULT_STITCH_MAX_CLIPS = 3
+DEFAULT_STITCH_CROSSFADE_MS = 120
 
 
 def calculate_snr(audio: np.ndarray, sr: int, frame_length: int = 2048) -> float:
@@ -102,6 +106,128 @@ def get_audio_info(file_path: str) -> Tuple[float, float, int]:
         return 0.0, -np.inf, 0
 
 
+def _load_reference_candidates(
+    refers_dir: str,
+    fallback_min: float,
+) -> List[Tuple[str, float, float]]:
+    refers_path = Path(refers_dir)
+    if not refers_path.exists():
+        rprint(f"[red]Reference directory not found: {refers_dir}[/red]")
+        return []
+
+    # Exclude already enhanced or stitched files to prevent double processing
+    ref_files = [
+        f for f in refers_path.glob("*.wav")
+        if "_enhanced" not in f.stem and not f.stem.startswith("stitched_")
+    ]
+    if not ref_files:
+        rprint(f"[red]No WAV files found in {refers_dir}[/red]")
+        return []
+
+    candidates: List[Tuple[str, float, float]] = []  # (path, duration, snr)
+
+    rprint(f"[cyan]Analyzing {len(ref_files)} reference segments...[/cyan]")
+
+    for ref_file in ref_files:
+        duration, snr, _ = get_audio_info(str(ref_file))
+        if duration >= fallback_min:
+            candidates.append((str(ref_file), duration, snr))
+
+    if not candidates:
+        rprint(f"[red]No reference audio >= {fallback_min}s found[/red]")
+
+    return candidates
+
+
+def _select_best_reference(
+    candidates: List[Tuple[str, float, float]],
+    min_duration: float,
+    max_duration: float,
+    prefer_snr: bool
+) -> Tuple[Optional[Tuple[str, float, float]], bool]:
+    if not candidates:
+        return None, False
+
+    optimal = [(p, d, s) for p, d, s in candidates if min_duration <= d <= max_duration]
+
+    if optimal:
+        if prefer_snr:
+            optimal.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        else:
+            optimal.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        return optimal[0], True
+
+    candidates.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return candidates[0], False
+
+
+def _build_stitched_reference(
+    candidates: List[Tuple[str, float, float]],
+    refers_dir: str,
+    min_duration: float,
+    max_duration: float,
+    prefer_snr: bool = True,
+    max_clips: int = DEFAULT_STITCH_MAX_CLIPS,
+    crossfade_ms: int = DEFAULT_STITCH_CROSSFADE_MS
+) -> Optional[str]:
+    if len(candidates) < 2:
+        return None
+
+    if prefer_snr:
+        candidates = sorted(candidates, key=lambda x: (x[2], x[1]), reverse=True)
+    else:
+        candidates = sorted(candidates, key=lambda x: (x[1], x[2]), reverse=True)
+
+    selected = []
+    total_duration = 0.0
+    for candidate in candidates:
+        if len(selected) >= max_clips:
+            break
+        selected.append(candidate)
+        total_duration += candidate[1]
+        if total_duration >= min_duration:
+            break
+
+    if total_duration < min_duration:
+        return None
+
+    signature = "|".join(Path(item[0]).name for item in selected)
+    signature += f":{min_duration}:{max_duration}:{crossfade_ms}"
+    digest = hashlib.md5(signature.encode("utf-8")).hexdigest()[:10]
+    stitched_path = Path(refers_dir) / f"stitched_{digest}.wav"
+
+    if stitched_path.exists():
+        rprint(f"[cyan]Using cached stitched reference: {stitched_path.name}[/cyan]")
+        return str(stitched_path)
+
+    try:
+        from pydub import AudioSegment
+    except ImportError:
+        rprint("[yellow]pydub not installed, cannot stitch references[/yellow]")
+        return None
+
+    merged = None
+    for path, _, _ in selected:
+        clip = AudioSegment.from_file(path)
+        if merged is None:
+            merged = clip
+        else:
+            overlap = min(crossfade_ms, len(merged), len(clip))
+            merged = merged.append(clip, crossfade=overlap)
+
+    if merged is None:
+        return None
+
+    if max_duration > 0 and len(merged) > int(max_duration * 1000):
+        merged = merged[:int(max_duration * 1000)]
+
+    stitched_path.parent.mkdir(parents=True, exist_ok=True)
+    merged.export(stitched_path, format="wav")
+    rprint(f"[green]✓ Stitched reference created: {stitched_path.name}[/green]")
+
+    return str(stitched_path)
+
+
 def find_best_reference(
     refers_dir: str = "output/audio/refers",
     min_duration: float = DEFAULT_MIN_DURATION,
@@ -126,51 +252,21 @@ def find_best_reference(
     Returns:
         Path to best reference audio, or None if none suitable found
     """
-    refers_path = Path(refers_dir)
-    if not refers_path.exists():
-        rprint(f"[red]Reference directory not found: {refers_dir}[/red]")
-        return None
-
-    # Exclude already enhanced files to prevent double enhancement
-    ref_files = [f for f in refers_path.glob("*.wav") if "_enhanced" not in f.stem]
-    if not ref_files:
-        rprint(f"[red]No WAV files found in {refers_dir}[/red]")
-        return None
-
-    # Analyze all segments
-    candidates: List[Tuple[str, float, float]] = []  # (path, duration, snr)
-
-    rprint(f"[cyan]Analyzing {len(ref_files)} reference segments...[/cyan]")
-
-    for ref_file in ref_files:
-        duration, snr, _ = get_audio_info(str(ref_file))
-        if duration >= fallback_min:
-            candidates.append((str(ref_file), duration, snr))
-
+    candidates = _load_reference_candidates(refers_dir, fallback_min)
     if not candidates:
-        rprint(f"[red]No reference audio >= {fallback_min}s found[/red]")
         return None
 
-    # Filter by optimal duration range
-    optimal = [(p, d, s) for p, d, s in candidates if min_duration <= d <= max_duration]
+    best, is_optimal = _select_best_reference(candidates, min_duration, max_duration, prefer_snr)
+    if not best:
+        return None
 
-    if optimal:
-        # Sort by SNR (highest first) if prefer_snr, otherwise by duration
-        if prefer_snr:
-            optimal.sort(key=lambda x: x[2], reverse=True)
-        else:
-            optimal.sort(key=lambda x: x[1], reverse=True)
-
-        best = optimal[0]
+    if is_optimal:
         rprint(f"[green]✓ Found optimal reference: {Path(best[0]).name} "
                f"({best[1]:.1f}s, SNR: {best[2]:.1f}dB)[/green]")
-        return best[0]
+    else:
+        rprint(f"[yellow]Using best available: {Path(best[0]).name} "
+               f"({best[1]:.1f}s, SNR: {best[2]:.1f}dB)[/yellow]")
 
-    # Fallback: use longest segment with acceptable quality
-    candidates.sort(key=lambda x: (x[1], x[2]), reverse=True)
-    best = candidates[0]
-    rprint(f"[yellow]Using best available: {Path(best[0]).name} "
-           f"({best[1]:.1f}s, SNR: {best[2]:.1f}dB)[/yellow]")
     return best[0]
 
 
@@ -306,7 +402,11 @@ def get_best_enhanced_reference(
     max_duration: float = DEFAULT_MAX_DURATION,
     fallback_min: float = DEFAULT_FALLBACK_MIN,
     enhance: bool = True,
-    noise_reduce_strength: float = 0.3
+    noise_reduce_strength: float = 0.3,
+    prefer_snr: bool = True,
+    stitch_short_refs: bool = True,
+    stitch_max_clips: int = DEFAULT_STITCH_MAX_CLIPS,
+    stitch_crossfade_ms: int = DEFAULT_STITCH_CROSSFADE_MS
 ) -> Optional[str]:
     """
     Get the best reference audio, optionally enhanced.
@@ -320,20 +420,43 @@ def get_best_enhanced_reference(
         fallback_min: Minimum acceptable duration if no ideal found (default 5s)
         enhance: Whether to apply noise reduction/normalization
         noise_reduce_strength: Strength of noise reduction
+        prefer_snr: Prefer higher SNR when selecting candidates
+        stitch_short_refs: Stitch multiple clips if best is shorter than min_duration
+        stitch_max_clips: Max clips to stitch
+        stitch_crossfade_ms: Crossfade between stitched clips (ms)
 
     Returns:
         Path to best (optionally enhanced) reference audio
     """
-    # Find best raw reference
-    best_ref = find_best_reference(
-        refers_dir=refers_dir,
-        min_duration=min_duration,
-        max_duration=max_duration,
-        fallback_min=fallback_min
-    )
-
-    if best_ref is None:
+    # Find best raw reference + candidates for stitching
+    candidates = _load_reference_candidates(refers_dir, fallback_min)
+    if not candidates:
         return None
+
+    best, is_optimal = _select_best_reference(candidates, min_duration, max_duration, prefer_snr)
+    if not best:
+        return None
+    best_ref, best_duration, best_snr = best
+
+    if is_optimal:
+        rprint(f"[green]✓ Found optimal reference: {Path(best_ref).name} "
+               f"({best_duration:.1f}s, SNR: {best_snr:.1f}dB)[/green]")
+    else:
+        rprint(f"[yellow]Using best available: {Path(best_ref).name} "
+               f"({best_duration:.1f}s, SNR: {best_snr:.1f}dB)[/yellow]")
+
+    if stitch_short_refs and best_duration < min_duration:
+        stitched = _build_stitched_reference(
+            candidates=candidates,
+            refers_dir=refers_dir,
+            min_duration=min_duration,
+            max_duration=max_duration,
+            prefer_snr=prefer_snr,
+            max_clips=stitch_max_clips,
+            crossfade_ms=stitch_crossfade_ms
+        )
+        if stitched:
+            best_ref = stitched
 
     if not enhance:
         return best_ref

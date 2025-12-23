@@ -116,6 +116,12 @@ cosyvoice3:
   api_url: 'http://localhost:50000'
   mode: 'cross_lingual'
   sample_rate: 22050
+  auto_switch: true
+  hesitation_patterns:
+  - '\\b(uh|um|erm|hmm|uhh|umm)\\b'
+  - 'ээ+|э-э+|эм+|мм+|м-м+'
+  - '嗯|呃|啊|额'
+  - 'えー+|えっと|うーん'
   # For instruct2 mode only (manual instruction):
   # speed_instruction: 'speak naturally'
 
