@@ -251,6 +251,50 @@ api:
 
 ---
 
+## TTS предупреждения
+
+### 8. CosyVoice3: короткий текст vs длинный референс
+**Предупреждение:**
+```
+WARNING synthesis text "We emphasize the study of technical specifics,."
+too short than prompt text "которые уже достаточно давно в профессии..."
+this may lead to bad performance
+```
+
+**Причина:** В zero-shot режиме CosyVoice использует референсный аудио-сегмент для клонирования голоса. Если текст для синтеза значительно короче референса, качество может ухудшиться.
+
+**Текущее поведение:** Используется лучший доступный референс (по SNR и длительности), но не учитывается соотношение длин.
+
+**Возможные решения:**
+
+1. **Подбирать референс по длине текста:**
+```python
+def select_reference_by_text_length(synthesis_text: str, references: list) -> str:
+    """Выбрать референс с похожей длиной текста."""
+    target_len = len(synthesis_text)
+    # Найти референс с ближайшей длиной
+    return min(references, key=lambda r: abs(len(r.text) - target_len))
+```
+
+2. **Использовать cross_lingual вместо zero_shot для коротких фраз:**
+```python
+if len(synthesis_text) < MIN_ZERO_SHOT_LENGTH:
+    mode = "cross_lingual"  # Не требует референсного текста
+else:
+    mode = "zero_shot"
+```
+
+3. **Объединять короткие сегменты перед синтезом:**
+```python
+# Если сегмент < 5 слов, объединить с соседним
+if word_count < 5 and can_merge_with_next:
+    merged_text = current + " " + next_segment
+```
+
+**Статус:** ⚠️ Требует исследования (не критично, но влияет на качество)
+
+---
+
 ## Тестирование
 
 ### Рекомендуемые тесты для добавления:
