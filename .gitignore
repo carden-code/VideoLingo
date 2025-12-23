@@ -168,6 +168,9 @@ batch/tasks_setting.xlsx
 AllinOne.ipynb
 config.backup.yaml
 
+# Local config (use config.yaml.example as template)
+config.yaml
+
 # runtime
 runtime/
 dev/
