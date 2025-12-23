@@ -28,8 +28,11 @@ def verify_translation_quality(src_text: list, trans_text: list, sample_size: in
     Returns:
         True if verification passes, raises ValueError if critical issues found
     """
-    if not load_key("verify_translation", False):
-        return True  # Skip if not enabled in config
+    try:
+        if not load_key("verify_translation"):
+            return True  # Skip if not enabled in config
+    except KeyError:
+        return True  # Skip if not configured
 
     console.print("[cyan]🔍 Running LLM translation verification...[/cyan]")
 
