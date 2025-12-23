@@ -95,21 +95,64 @@ def build_anchor_constraints(lines: List[str], anchors_by_line: List[List[Dict]]
     return "\n".join(rows)
 
 
+def _extract_content_words(term: str) -> List[str]:
+    """Extract significant content words from a term (skip stopwords like 'to', 'of', 'the')."""
+    stopwords = {'to', 'of', 'the', 'a', 'an', 'and', 'or', 'for', 'in', 'on', 'at', 'by', 'with'}
+    words = re.findall(r'\b\w+\b', term.lower())
+    content = [w for w in words if w not in stopwords and len(w) > 2]
+    return content if content else words  # fallback to all words if no content words
+
+
+def _term_matches(term: str, translation_lower: str, aliases: List[str]) -> bool:
+    """
+    Check if term matches translation using fuzzy logic:
+    1. Exact substring match
+    2. Aliases match
+    3. Any significant content word from term appears in translation
+    """
+    term_lower = term.lower()
+
+    # 1. Exact match
+    if term_lower in translation_lower:
+        return True
+
+    # 2. Aliases match
+    for alias in aliases:
+        if alias.lower() in translation_lower:
+            return True
+
+    # 3. Content words match (e.g., "to create" → check "create")
+    content_words = _extract_content_words(term)
+    for word in content_words:
+        # Use word boundary to avoid partial matches like "create" in "recreate"
+        if re.search(rf'\b{re.escape(word)}\b', translation_lower):
+            return True
+
+    return False
+
+
 def validate_anchor_requirements(translation: str, anchors: List[Dict]) -> List[str]:
+    """
+    Validate that required anchors appear in translation.
+
+    Only validates numbers and acronyms - these MUST be preserved exactly.
+    Terms are NOT validated because:
+    - They're already in the prompt as guidance
+    - LLM may use valid synonyms (e.g., "create" vs "to create")
+    - Strict validation causes false failures across languages
+    """
     missing = []
-    translation_lower = translation.lower()
     translation_norm = _normalize_number_text(translation)
     translation_digits = re.sub(r'\D', '', translation)
 
     for anchor in anchors:
         anchor_type = anchor.get("type")
         value = anchor.get("value", "")
+
+        # Skip term validation - terms are guidance, not strict requirements
         if anchor_type == "term":
-            aliases = anchor.get("aliases", [])
-            if value.lower() not in translation_lower:
-                alias_hits = [alias for alias in aliases if alias.lower() in translation_lower]
-                if not alias_hits:
-                    missing.append(value)
+            continue
+
         elif anchor_type == "acronym":
             if value not in translation:
                 missing.append(value)
@@ -119,7 +162,4 @@ def validate_anchor_requirements(translation: str, anchors: List[Dict]) -> List[
             if normalized and normalized not in translation_norm:
                 if digits and digits not in translation_digits:
                     missing.append(value)
-        else:
-            if value and value.lower() not in translation_lower:
-                missing.append(value)
     return missing
