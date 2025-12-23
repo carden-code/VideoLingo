@@ -52,16 +52,41 @@ def find_split_positions(original, modified):
 def split_sentence(sentence, num_parts, word_limit=20, index=-1, retry_attempt=0):
     """Split a long sentence using GPT and return the result as a string."""
     split_prompt = get_split_prompt(sentence, num_parts, word_limit)
+
+    # JSON schema for structured output
+    split_schema = {
+        "name": "split_sentence",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "analysis": {"type": "string"},
+                "split1": {"type": "string"},
+                "split2": {"type": "string"},
+                "assess": {"type": "string"},
+                "choice": {"type": "string"}
+            },
+            "required": ["analysis", "split1", "split2", "assess", "choice"],
+            "additionalProperties": False
+        }
+    }
+
     def valid_split(response_data):
-        choice = response_data["choice"]
+        choice = str(response_data["choice"])  # Handle int or string
         if f'split{choice}' not in response_data:
             return {"status": "error", "message": "Missing required key: `split`"}
         if "[br]" not in response_data[f"split{choice}"]:
             return {"status": "error", "message": "Split failed, no [br] found"}
         return {"status": "success", "message": "Split completed"}
-    
-    response_data = ask_gpt(split_prompt + " " * retry_attempt, resp_type='json', valid_def=valid_split, log_title='split_by_meaning')
-    choice = response_data["choice"]
+
+    response_data = ask_gpt(
+        split_prompt + " " * retry_attempt,
+        resp_type='json',
+        valid_def=valid_split,
+        log_title='split_by_meaning',
+        json_schema=split_schema
+    )
+    choice = str(response_data["choice"])  # Handle int or string
     best_split = response_data[f"split{choice}"]
     split_points = find_split_positions(sentence, best_split)
     # split the sentence based on the split points

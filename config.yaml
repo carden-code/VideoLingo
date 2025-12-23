@@ -21,6 +21,7 @@ api:
   base_url: 'https://openrouter.ai/api/v1'
   model: 'deepseek/deepseek-v3.2'
   llm_support_json: true
+  structured_output: 'schema' # schema | json | none
   proxy: ''  # HTTP proxy URL (e.g., 'http://127.0.0.1:7890')
 
 # Number of LLM multi-threaded accesses, set to 1 if using local LLM

@@ -81,7 +81,21 @@ Respond in JSON format:
 }}"""
 
     try:
-        result = ask_gpt(prompt, resp_type='json', log_title='verify_translation')
+        schema = {
+            "name": "verify_translation_quality",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "passed": {"type": "boolean"},
+                    "issues": {"type": "array", "items": {"type": "string"}},
+                    "critical": {"type": "boolean"}
+                },
+                "required": ["passed", "issues", "critical"],
+                "additionalProperties": False
+            }
+        }
+        result = ask_gpt(prompt, resp_type='json', log_title='verify_translation', json_schema=schema)
 
         if result.get('critical', False):
             issues = result.get('issues', ['Unknown critical issue'])

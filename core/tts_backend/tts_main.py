@@ -43,7 +43,20 @@ def tts_main(text, save_as, number, task_df):
         try:
             if attempt >= max_retries - 1:
                 print("Asking GPT to correct text...")
-                correct_text = ask_gpt(get_correct_text_prompt(text), resp_type="json", log_title='tts_correct_text')
+                # JSON schema for structured output
+                correct_schema = {
+                    "name": "text_correction",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"}
+                        },
+                        "required": ["text"],
+                        "additionalProperties": False
+                    }
+                }
+                correct_text = ask_gpt(get_correct_text_prompt(text), resp_type="json", log_title='tts_correct_text', json_schema=correct_schema)
                 text = correct_text['text']
 
             if TTS_METHOD == 'chatterbox_tts':

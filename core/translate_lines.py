@@ -101,7 +101,31 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
             strict = attempt == 1
             prompt = build_prompt(start, end, strict)
             try:
-                result = ask_gpt(prompt + attempt * " ", resp_type='json', valid_def=valid_result, log_title=f'translate_{step_name}')
+                schema = {
+                    "name": f"{step_name}_translation",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "patternProperties": {
+                            "^\\d+$": {
+                                "type": "object",
+                                "properties": {
+                                    field_name: {"type": "string"}
+                                },
+                                "required": [field_name],
+                                "additionalProperties": True
+                            }
+                        },
+                        "additionalProperties": False
+                    }
+                }
+                result = ask_gpt(
+                    prompt + attempt * " ",
+                    resp_type='json',
+                    valid_def=valid_result,
+                    log_title=f'translate_{step_name}',
+                    json_schema=schema
+                )
                 missing = validate_anchor_result(result, sub_anchors, field_name)
                 if missing:
                     raise ValueError(f"Anchor validation failed: {missing}")

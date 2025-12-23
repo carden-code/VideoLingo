@@ -48,6 +48,11 @@ def build_anchor_requirements(source: str, terms: List[Dict]) -> List[Dict]:
         src_term = str(term.get('src', '')).strip()
         tgt_term = str(term.get('tgt', '')).strip()
         note = str(term.get('note', '')).strip()
+        aliases = term.get('aliases', [])
+        if isinstance(aliases, str):
+            aliases = [a.strip() for a in aliases.split(',') if a.strip()]
+        if not isinstance(aliases, list):
+            aliases = []
         if not src_term:
             continue
         if src_term.lower() not in src_lower:
@@ -55,7 +60,7 @@ def build_anchor_requirements(source: str, terms: List[Dict]) -> List[Dict]:
         if _should_keep_source(note, tgt_term, src_term) or not tgt_term:
             anchors.append({"type": "term", "value": src_term})
         else:
-            anchors.append({"type": "term", "value": tgt_term})
+            anchors.append({"type": "term", "value": tgt_term, "aliases": aliases})
 
     for match in NUMBER_RE.findall(source):
         normalized = _normalize_number_token(match)
@@ -100,8 +105,11 @@ def validate_anchor_requirements(translation: str, anchors: List[Dict]) -> List[
         anchor_type = anchor.get("type")
         value = anchor.get("value", "")
         if anchor_type == "term":
+            aliases = anchor.get("aliases", [])
             if value.lower() not in translation_lower:
-                missing.append(value)
+                alias_hits = [alias for alias in aliases if alias.lower() in translation_lower]
+                if not alias_hits:
+                    missing.append(value)
         elif anchor_type == "acronym":
             if value not in translation:
                 missing.append(value)
