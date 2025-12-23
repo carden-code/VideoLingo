@@ -7,6 +7,7 @@ Supported languages: Chinese, English, Japanese, Korean, German, Spanish, French
 """
 
 from pathlib import Path
+import re
 import requests
 import hashlib
 import wave
@@ -299,6 +300,56 @@ def get_speed_instruction(speed_ratio: float, target_language: str = "en") -> st
     else:
         return lang_instructions["normal"]
 
+_AUTO_MODE_DECISION = None
+_AUTO_MODE_REF = None
+
+DEFAULT_HESITATION_PATTERNS = [
+    r"\b(uh|um|erm|hmm|uhh|umm)\b",
+    r"ээ+|э-э+|эм+|мм+|м-м+",
+    r"嗯|呃|啊|额",
+    r"えー+|えっと|うーん",
+]
+
+
+def has_hesitation(text: str, patterns: list) -> tuple[bool, str]:
+    if not text:
+        return False, ""
+    normalized = " ".join(str(text).lower().split())
+    for pattern in patterns:
+        try:
+            if re.search(pattern, normalized):
+                return True, pattern
+        except re.error:
+            continue
+    return False, ""
+
+
+def resolve_cosyvoice_mode(base_mode: str, reference_audio: str, reference_text: str, config: dict) -> str:
+    global _AUTO_MODE_DECISION, _AUTO_MODE_REF
+
+    if base_mode != "zero_shot":
+        return base_mode
+
+    auto_switch = config.get("auto_switch", True)
+    if not auto_switch:
+        return base_mode
+
+    if _AUTO_MODE_DECISION is not None and _AUTO_MODE_REF == reference_audio:
+        return _AUTO_MODE_DECISION
+
+    patterns = config.get("hesitation_patterns") or DEFAULT_HESITATION_PATTERNS
+    has_hes, matched = has_hesitation(reference_text, patterns)
+
+    if has_hes:
+        _AUTO_MODE_DECISION = "cross_lingual"
+        _AUTO_MODE_REF = reference_audio
+        rprint(f"[yellow]⚠️ Auto-switch to cross_lingual (hesitation pattern: {matched})[/yellow]")
+        return _AUTO_MODE_DECISION
+
+    _AUTO_MODE_DECISION = base_mode
+    _AUTO_MODE_REF = reference_audio
+    return _AUTO_MODE_DECISION
+
 
 def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
     """
@@ -389,6 +440,11 @@ def cosyvoice3_tts_for_videolingo(text, save_as, number, task_df):
         except (KeyError, IndexError):
             rprint(f"[yellow]Could not get reference text for segment {ref_number}, switching to cross_lingual mode[/yellow]")
             MODE = "cross_lingual"
+
+        if MODE == "zero_shot" and config.get("auto_switch", True):
+            MODE = resolve_cosyvoice_mode(MODE, audio_prompt, reference_text, config)
+            if MODE != "zero_shot":
+                reference_text = None
 
     # Generate TTS with fallback to silent audio
     try:
