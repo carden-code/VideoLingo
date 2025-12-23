@@ -2,7 +2,8 @@ import os
 import json
 from threading import Lock
 import json_repair
-from openai import OpenAI
+import httpx
+from openai import OpenAI, DefaultHttpxClient
 from core.utils.config_utils import load_key
 from rich import print as rprint
 from core.utils.decorator import except_handler
@@ -56,7 +57,17 @@ def ask_gpt(prompt, resp_type=None, valid_def=None, log_title="default"):
         base_url = "https://ark.cn-beijing.volces.com/api/v3" # huoshan base url
     elif 'v1' not in base_url:
         base_url = base_url.strip('/') + '/v1'
-    client = OpenAI(api_key=load_key("api.key"), base_url=base_url)
+
+    # Configure HTTP proxy if set
+    try:
+        proxy_url = load_key("api.proxy") or None
+    except KeyError:
+        proxy_url = None
+    if proxy_url:
+        http_client = DefaultHttpxClient(proxy=proxy_url)
+        client = OpenAI(api_key=load_key("api.key"), base_url=base_url, http_client=http_client)
+    else:
+        client = OpenAI(api_key=load_key("api.key"), base_url=base_url)
     response_format = {"type": "json_object"} if resp_type == "json" and load_key("api.llm_support_json") else None
 
     messages = [{"role": "user", "content": prompt}]
