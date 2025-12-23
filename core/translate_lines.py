@@ -5,6 +5,7 @@ from rich.table import Table
 from rich import box
 from core.utils import *
 from core.utils.anchor_utils import build_anchor_requirements, build_anchor_constraints, validate_anchor_requirements
+from core.utils.duration_utils import enrich_duration_info
 console = Console()
 
 def valid_translate_result(result: dict, required_keys: list, required_sub_keys: list):
@@ -46,6 +47,7 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
     shared_prompt = generate_shared_prompt(previous_content_prompt, after_cotent_prompt, summary_prompt, things_to_note_prompt)
 
     lines_list = lines.split('\n')
+    duration_info = enrich_duration_info(duration_info, lines_list)
     anchors_by_line = [
         build_anchor_requirements(line, terms or []) for line in lines_list
     ]
@@ -55,15 +57,33 @@ def translate_lines(lines, previous_content_prompt, after_cotent_prompt, things_
             return None
         line_durations = info.get("line_durations")
         line_chars = info.get("line_chars")
-        if not line_durations:
-            return info
-        sub_durations = line_durations[start:end]
+        sub_durations = line_durations[start:end] if line_durations else None
         sub_chars = line_chars[start:end] if line_chars else [len(line) for line in sub_lines]
+
+        target_cps = info.get("target_chars_per_sec")
+        line_target_chars = info.get("line_target_chars")
+        sub_target_chars = None
+        if line_target_chars:
+            sub_target_chars = line_target_chars[start:end]
+        elif target_cps and sub_durations:
+            sub_target_chars = [dur * target_cps for dur in sub_durations]
+
+        total_target_chars = sum(sub_target_chars) if sub_target_chars else info.get("target_chars")
+        target_ratio = None
+        if total_target_chars is not None and sub_chars:
+            target_ratio = total_target_chars / max(1, sum(sub_chars))
+
         return {
-            "total_duration": sum(sub_durations),
+            "total_duration": sum(sub_durations) if sub_durations else info.get("total_duration"),
             "src_chars": sum(sub_chars),
             "line_durations": sub_durations,
-            "line_chars": sub_chars
+            "line_chars": sub_chars,
+            "target_chars_per_sec": target_cps,
+            "target_chars": total_target_chars,
+            "line_target_chars": sub_target_chars,
+            "target_char_ratio": target_ratio,
+            "src_chars_per_sec": info.get("src_chars_per_sec"),
+            "speed_ratio": info.get("speed_ratio"),
         }
 
     def anchor_constraints_for(sub_lines, sub_anchors):

@@ -74,6 +74,25 @@ pause_before_translate: false
 # Cheap but effective - catches garbled/wrong language/empty translations
 verify_translation: true
 
+# Duration-aware translation guidance (optional per-language character budgets)
+duration_aware:
+  enabled: true
+  default_chars_per_sec: 15.0
+  speed_ratio:
+    min: 0.75
+    max: 1.25
+  chars_per_sec:
+    en: 15.0
+    ru: 13.5
+    zh: 7.0
+    ja: 7.0
+    ko: 7.5
+    es: 15.0
+    fr: 14.5
+    de: 14.0
+    it: 15.0
+    pt: 14.5
+
 ## ======================== Dubbing Settings ======================== ##
 
 # TTS selection [chatterbox_tts, cosyvoice3]
