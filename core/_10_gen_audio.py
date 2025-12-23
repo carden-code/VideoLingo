@@ -270,13 +270,13 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
         terms = load_terms()
         max_speed = load_key("speed_factor.max")
 
-        for _, row in tasks_df.head(warmup_size).iterrows():
+        for idx, row in tasks_df.head(warmup_size).iterrows():
             try:
                 number, real_dur, out_lines, out_src_lines = process_row(row, tasks_df, terms, max_speed)
-                tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
-                tasks_df.loc[tasks_df['number'] == number, 'lines'] = [out_lines]
+                tasks_df.at[idx, 'real_dur'] = real_dur
+                tasks_df.at[idx, 'lines'] = out_lines
                 if 'src_lines' in tasks_df.columns:
-                    tasks_df.loc[tasks_df['number'] == number, 'src_lines'] = [out_src_lines]
+                    tasks_df.at[idx, 'src_lines'] = out_src_lines
                 progress.advance(task)
             except Exception as e:
                 rprint(f"[red]❌ Error in warmup: {str(e)}[/red]")
@@ -297,10 +297,11 @@ def generate_tts_audio(tasks_df: pd.DataFrame) -> pd.DataFrame:
                 for future in as_completed(futures):
                     try:
                         number, real_dur, out_lines, out_src_lines = future.result()
-                        tasks_df.loc[tasks_df['number'] == number, 'real_dur'] = real_dur
-                        tasks_df.loc[tasks_df['number'] == number, 'lines'] = [out_lines]
+                        idx = tasks_df.index[tasks_df['number'] == number][0]
+                        tasks_df.at[idx, 'real_dur'] = real_dur
+                        tasks_df.at[idx, 'lines'] = out_lines
                         if 'src_lines' in tasks_df.columns:
-                            tasks_df.loc[tasks_df['number'] == number, 'src_lines'] = [out_src_lines]
+                            tasks_df.at[idx, 'src_lines'] = out_src_lines
                         progress.advance(task)
                     except Exception as e:
                         rprint(f"[red]❌ Error: {str(e)}[/red]")
